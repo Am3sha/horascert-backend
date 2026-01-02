@@ -21,6 +21,9 @@ const normalizeCertificateStatus = (doc) => {
  * @desc    Create a new certificate
  * @route   POST /api/certificates
  * @access  Private/Admin
+ * 
+ * IMPORTANT: Returns 202 Accepted immediately after validation and DB insert.
+ * Heavy operations (email, QR code) happen in background.
  */
 const createCertificate = async (req, res, next) => {
     try {
@@ -35,10 +38,12 @@ const createCertificate = async (req, res, next) => {
             scope
         } = req.body;
 
+        // Validate required fields
         if (!certificateNumber || !companyName || !issueDate || !expiryDate || !standard || !scope) {
             return next(new ApiError(400, 'Missing required fields'));
         }
 
+        // Check for duplicate
         const existing = await Certificate.findOne({ certificateNumber: String(certificateNumber).trim() });
         if (existing) {
             return next(new ApiError(400, 'Certificate number already exists'));
@@ -60,6 +65,7 @@ const createCertificate = async (req, res, next) => {
         const baseUrl = process.env.COMPANY_WEBSITE || 'http://localhost:3000';
         const certificateUrl = `${baseUrl}/certificate/${generatedCertificateId}`;
 
+        // Create certificate record in DB
         const certificate = await Certificate.create({
             certificateId: generatedCertificateId,
             certificateNumber: String(certificateNumber).trim(),
@@ -75,19 +81,27 @@ const createCertificate = async (req, res, next) => {
             createdBy: req.user.id
         });
 
-        // Send notification email
-        try {
-            await sendCertificateNotification(certificate);
-            logger.info(`Notification email sent for certificate ${certificate.certificateNumber}`);
-        } catch (emailError) {
-            logger.error('Failed to send notification email:', emailError);
-        }
-
-        res.status(201).json({
+        // ✅ RETURN IMMEDIATELY (202 Accepted)
+        // Background tasks continue processing without blocking the client
+        res.status(202).json({
             success: true,
+            message: 'Certificate created and processing',
             data: normalizeCertificateStatus(certificate.toObject()),
             certificateUrl
         });
+
+        // 🔄 BACKGROUND PROCESSING (non-blocking)
+        // Send notification email asynchronously without awaiting
+        setImmediate(async () => {
+            try {
+                await sendCertificateNotification(certificate);
+                logger.info(`Notification email sent for certificate ${certificate.certificateNumber}`);
+            } catch (emailError) {
+                // Log error but don't crash - email failure shouldn't block certificate creation
+                logger.error(`Failed to send notification email for ${certificate.certificateNumber}:`, emailError);
+            }
+        });
+
     } catch (error) {
         logger.error('Error creating certificate:', error);
         next(error);

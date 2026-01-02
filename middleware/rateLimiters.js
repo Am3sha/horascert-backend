@@ -1,9 +1,19 @@
 const rateLimit = require('express-rate-limit');
 
+/**
+ * Custom key generator that safely extracts IP address
+ * Works correctly with trust proxy enabled (Railway infrastructure)
+ */
+const getClientIp = (req) => {
+    // After app.set('trust proxy', 1), req.ip returns the correct forwarded IP
+    return req.ip || req.connection.remoteAddress || 'unknown';
+};
+
 // Auth login limiter: 5 attempts per 15 minutes
 const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
     max: 5,
+    keyGenerator: getClientIp, // Use custom IP extractor
     standardHeaders: true,
     legacyHeaders: false,
     handler: (req, res) => {
@@ -19,6 +29,7 @@ const loginLimiter = rateLimit({
 const applicationLimiter = rateLimit({
     windowMs: 60 * 60 * 1000, // 1 hour
     max: 10,
+    keyGenerator: getClientIp, // Use custom IP extractor
     standardHeaders: true,
     legacyHeaders: false,
     handler: (req, res) => {
@@ -34,6 +45,7 @@ const applicationLimiter = rateLimit({
 const contactEmailLimiter = rateLimit({
     windowMs: 60 * 60 * 1000, // 1 hour
     max: 5,
+    keyGenerator: getClientIp, // Use custom IP extractor
     standardHeaders: true,
     legacyHeaders: false,
     handler: (req, res) => {
@@ -48,5 +60,6 @@ const contactEmailLimiter = rateLimit({
 module.exports = {
     loginLimiter,
     applicationLimiter,
-    contactEmailLimiter
+    contactEmailLimiter,
+    getClientIp
 };

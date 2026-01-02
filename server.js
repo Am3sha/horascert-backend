@@ -22,12 +22,16 @@ const PORT = process.env.PORT || 5001;
 // Connect to MongoDB before starting routes
 connectDB();
 
+// CRITICAL: Enable proxy trust for Railway infrastructure
+// Must come BEFORE any middleware that reads X-Forwarded-For, X-Forwarded-Proto, etc.
+app.set('trust proxy', 1);
+
 // Middleware - CORS, JSON parsers
 app.use(cors({
     origin: function (origin, callback) {
         // Allow requests from Vercel frontend, Railway backend, and localhost
         const allowedOrigins = [
-            'https://horascert.vercel.app',
+            'https://horascert-frontend.vercel.app/',
             'http://localhost:3000',
             'http://127.0.0.1:3000',
             origin // Also allow the requesting origin
