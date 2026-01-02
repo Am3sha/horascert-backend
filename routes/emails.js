@@ -38,19 +38,27 @@ router.post('/', contactEmailLimiter, contactValidation, async (req, res) => {
             status: 'new'
         });
 
-        let emailSent = false;
-        try {
-            const emailResult = await sendContactEmail({ name, email, phone, subject, message });
-            emailSent = Boolean(emailResult && emailResult.success);
-        } catch (err) {
-            logger.error('Failed to send contact notification email:', err);
-            emailSent = false;
-        }
-
-        return res.status(201).json({
+        // ✅ Return success IMMEDIATELY - email is saved to database!
+        // This is critical for UX: user gets instant feedback
+        res.status(201).json({
             success: true,
-            emailSent,
-            data: created
+            emailId: created._id,
+        });
+
+        // 🔄 Send email notification in background (non-blocking)
+        // Uses setImmediate to ensure this runs after response is sent
+        setImmediate(async () => {
+            try {
+                const emailResult = await sendContactEmail({ name, email, phone, subject, message });
+                if (emailResult && emailResult.success) {
+                    logger.info('Notification email sent for contact form', { emailId: created._id });
+                } else {
+                    logger.warn('Failed to send contact notification email', { emailId: created._id });
+                }
+            } catch (err) {
+                logger.error('Failed to send contact notification email:', err);
+                // Email failure is logged but doesn't affect user's submission
+            }
         });
     } catch (error) {
         logger.error('Error submitting contact email:', error);

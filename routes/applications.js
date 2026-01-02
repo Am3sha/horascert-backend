@@ -301,28 +301,28 @@ router.post('/', upload.array('file', 10), applicationValidation, async (req, re
       additionalInfo,
     };
 
-    // Send email notification (async, don't block on failure)
-    let emailSent = false;
-    try {
-      const emailResult = await sendApplicationEmail(applicationData);
-      emailSent = Boolean(emailResult && emailResult.success);
-      if (emailSent) {
-        logger.info('Notification email sent for application', { requestId: savedRequest._id });
-      } else {
-        logger.warn('Failed to send notification email', { requestId: savedRequest._id, error: emailResult?.error });
-      }
-    } catch (emailError) {
-      logger.error('Error sending application email:', emailError);
-      // Email failure does NOT block success response
-      emailSent = false;
-    }
-
-    // Return success - application is saved even if email failed
+    // ✅ Return success IMMEDIATELY - application is saved to database!
+    // This is critical for UX: user gets instant feedback
     res.status(201).json({
       success: true,
       message: 'Application submitted successfully',
-      emailSent: emailSent,
       requestId: savedRequest._id,
+    });
+
+    // 🔄 Send email notification in background (non-blocking)
+    // Uses setImmediate to ensure this runs after response is sent
+    setImmediate(async () => {
+      try {
+        const emailResult = await sendApplicationEmail(applicationData);
+        if (emailResult && emailResult.success) {
+          logger.info('Notification email sent for application', { requestId: savedRequest._id });
+        } else {
+          logger.warn('Failed to send notification email', { requestId: savedRequest._id, error: emailResult?.error });
+        }
+      } catch (emailError) {
+        logger.error('Error sending application email:', emailError);
+        // Email failure is logged but doesn't affect user's application submission
+      }
     });
   } catch (error) {
     logger.error('Error processing application:', error);
@@ -383,28 +383,28 @@ router.post('/contact', contactEmailLimiter, contactValidation, async (req, res)
       message,
     };
 
-    // Send email notification (async, don't block on failure)
-    let emailSent = false;
-    try {
-      const emailResult = await sendContactEmail(contactData);
-      emailSent = Boolean(emailResult && emailResult.success);
-      if (emailSent) {
-        logger.info('Notification email sent for contact form', { emailId: savedEmail._id });
-      } else {
-        logger.warn('Failed to send contact notification email', { emailId: savedEmail._id });
-      }
-    } catch (emailError) {
-      logger.error('Error sending contact email:', emailError);
-      // Email failure does NOT block success response
-      emailSent = false;
-    }
-
-    // Return success - contact message is saved even if notification email failed
+    // ✅ Return success IMMEDIATELY - contact message is saved to database!
+    // This is critical for UX: user gets instant feedback
     res.status(201).json({
       success: true,
       message: 'Message submitted successfully',
-      emailSent: emailSent,
       emailId: savedEmail._id,
+    });
+
+    // 🔄 Send email notification in background (non-blocking)
+    // Uses setImmediate to ensure this runs after response is sent
+    setImmediate(async () => {
+      try {
+        const emailResult = await sendContactEmail(contactData);
+        if (emailResult && emailResult.success) {
+          logger.info('Notification email sent for contact form', { emailId: savedEmail._id });
+        } else {
+          logger.warn('Failed to send notification email', { emailId: savedEmail._id });
+        }
+      } catch (emailError) {
+        logger.error('Error sending contact email:', emailError);
+        // Email failure is logged but doesn't affect user's message submission
+      }
     });
   } catch (error) {
     logger.error('Error processing contact form:', error);
