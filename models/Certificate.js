@@ -178,10 +178,10 @@ certificateSchema.index({ issueDate: -1 });
 certificateSchema.index({ expiryDate: 1 });
 certificateSchema.index({ status: 1, createdAt: -1 });
 
-// Virtual for certificate URL
-certificateSchema.virtual('certificateUrl').get(function () {
-    return `${process.env.COMPANY_WEBSITE || 'http://localhost:3000'}/certificate/${this.certificateId}`;
-});
+// NOTE: certificateUrl is NOT generated in Backend.
+// Frontend generates URLs dynamically using window.location.origin
+// This ensures URLs always point to the current domain (vercel.app, horascert.com, etc.)
+// NO hardcoded domains in Backend or Database!
 
 // Method to check if certificate is expired
 certificateSchema.methods.checkExpiration = function () {

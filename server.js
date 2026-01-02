@@ -29,8 +29,10 @@ app.set('trust proxy', 1);
 // Middleware - CORS, JSON parsers
 app.use(cors({
     origin: function (origin, callback) {
-        // Allow requests from Vercel frontend, Railway backend, and localhost
+        // Allow requests from custom domain, Vercel frontend, Railway backend, and localhost
         const allowedOrigins = [
+            'https://horascert.com',
+            'https://www.horascert.com',
             'https://horascert-frontend.vercel.app/',
             'http://localhost:3000',
             'http://127.0.0.1:3000',

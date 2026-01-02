@@ -62,8 +62,8 @@ const createCertificate = async (req, res, next) => {
             };
         }
 
-        const baseUrl = process.env.COMPANY_WEBSITE || 'http://localhost:3000';
-        const certificateUrl = `${baseUrl}/certificate/${generatedCertificateId}`;
+        // Backend only returns certificateId - Frontend constructs URLs using window.location.origin
+        // This ensures URLs are always correct regardless of domain
 
         // Create certificate record in DB
         const certificate = await Certificate.create({
@@ -86,8 +86,8 @@ const createCertificate = async (req, res, next) => {
         res.status(202).json({
             success: true,
             message: 'Certificate created and processing',
-            data: normalizeCertificateStatus(certificate.toObject()),
-            certificateUrl
+            data: normalizeCertificateStatus(certificate.toObject())
+            // ✅ NO certificateUrl returned - Frontend builds URLs using window.location.origin
         });
 
         // 🔄 BACKGROUND PROCESSING (non-blocking)
@@ -242,20 +242,16 @@ const getCertificateQrPng = async (req, res, next) => {
             return next(new ApiError(404, 'Certificate not found'));
         }
 
-        const baseUrl = process.env.COMPANY_WEBSITE || 'http://localhost:3000';
-        const certificateUrl = `${baseUrl}/certificate/${certificate.certificateId}`;
-        const qrTargetUrl = certificateUrl;
+        // NOTE: QR Code generation moved to Frontend
+        // Backend no longer generates QRs because it doesn't know the frontend domain
+        // Frontend generates QRs using the current domain (window.location.origin)
 
-        const buffer = await QRCode.toBuffer(qrTargetUrl, {
-            type: 'png',
-            width: 400,
-            margin: 2,
-            color: { dark: '#000000', light: '#FFFFFF' }
-        });
+        if (!certificate) {
+            return next(new ApiError(404, 'Certificate not found'));
+        }
 
-        res.setHeader('Content-Type', 'image/png');
-        res.setHeader('Cache-Control', 'public, max-age=3600');
-        return res.status(200).send(buffer);
+        // Return 404 - QR generation now happens in Frontend only
+        return next(new ApiError(410, 'QR endpoint deprecated - QR codes are generated in Frontend'));
     } catch (error) {
         logger.error('Error generating certificate QR:', error);
         return next(error);
