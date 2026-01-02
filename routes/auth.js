@@ -73,11 +73,14 @@ router.post(
                         throw err;
                     }
 
+                    // Set cookie with proper configuration for cross-domain (Vercel ↔ Railway)
                     res.cookie('token', token, {
                         httpOnly: true,
-                        secure: process.env.NODE_ENV === 'production',
-                        sameSite: 'lax',
-                        maxAge: 4 * 60 * 60 * 1000 // 4 hours
+                        secure: true, // Always true in production (HTTPS required)
+                        sameSite: 'none', // Allow cross-site cookie sending
+                        maxAge: 4 * 60 * 60 * 1000, // 4 hours
+                        path: '/', // Available on all paths
+                        domain: undefined // Browser automatically handles domain
                     });
 
                     res.json({
@@ -101,8 +104,9 @@ router.post(
 router.post('/logout', auth, (req, res) => {
     res.clearCookie('token', {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax'
+        secure: true, // Must match login cookie settings
+        sameSite: 'none', // Must match login cookie settings
+        path: '/' // Must match login cookie settings
     });
     res.status(200).json({
         success: true,

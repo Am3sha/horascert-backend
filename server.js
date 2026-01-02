@@ -24,8 +24,27 @@ connectDB();
 
 // Middleware - CORS, JSON parsers
 app.use(cors({
-    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
-    credentials: true,
+    origin: function (origin, callback) {
+        // Allow requests from Vercel frontend, Railway backend, and localhost
+        const allowedOrigins = [
+            'https://horascert.vercel.app',
+            'http://localhost:3000',
+            'http://127.0.0.1:3000',
+            origin // Also allow the requesting origin
+        ];
+
+        // Check if origin is in allowed list
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, origin || true);
+        } else {
+            // Still allow the request, but don't expose credentials
+            callback(null, false);
+        }
+    },
+    credentials: true, // Allow credentials (cookies, auth headers)
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    maxAge: 86400 // 24 hours
 }));
 
 // Increase request size limits to handle large payloads (Base64 encoded files, etc.)
