@@ -68,7 +68,7 @@ const sendApplicationEmail = async (applicationData) => {
 
     const mailOptions = {
       from: `"HORAS-Cert Website" <${process.env.EMAIL_FROM || process.env.MAIL_USER || process.env.EMAIL_USER}>`,
-      to: process.env.EMAIL_TO || 'info@horas-cert.com',
+      to: process.env.EMAIL_TO || 'info@horascert.com',
       subject: 'New Certification Application',
       html: emailBody,
     };
@@ -109,7 +109,7 @@ const sendContactEmail = async (contactData) => {
 
     const mailOptions = {
       from: `"HORAS-Cert Website" <${process.env.EMAIL_FROM || process.env.MAIL_USER || process.env.EMAIL_USER}>`,
-      to: process.env.EMAIL_TO || 'info@horas-cert.com',
+      to: process.env.EMAIL_TO || 'info@horascert.com',
       subject: `Contact Form: ${contactData.subject}`,
       html: emailBody,
     };
@@ -148,8 +148,8 @@ const sendCertificateNotification = async (certificate) => {
     `;
 
     const mailOptions = {
-      from: `"HORAS-Cert Website" <${process.env.EMAIL_FROM || process.env.MAIL_USER || process.env.EMAIL_USER}>`,
-      to: process.env.EMAIL_TO || 'info@horas-cert.com',
+      from: `"Horascert.com " <${process.env.EMAIL_FROM || process.env.MAIL_USER || process.env.EMAIL_USER}>`,
+      to: process.env.EMAIL_TO || 'info@horascert.com',
       subject: `New Certificate Created: ${certificate.certificateNumber}`,
       html: emailBody,
     };
