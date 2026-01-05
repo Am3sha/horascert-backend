@@ -17,7 +17,14 @@ class ApiError extends Error {
 
 // Error handling middleware
 const errorHandler = (err, req, res, next) => {
-    let { statusCode = 500, message } = err;
+    let { statusCode, message } = err;
+
+    // For ApiError instances, always use the statusCode (even if it's 401/403)
+    if (err instanceof ApiError) {
+        statusCode = err.statusCode;
+    } else {
+        statusCode = statusCode || 500;
+    }
 
     // Handle oversized payload (413 Payload Too Large)
     if (err.type === 'entity.too.large' || err.status === 413) {
@@ -81,7 +88,31 @@ const errorHandler = (err, req, res, next) => {
     }
 
     if (process.env.NODE_ENV === 'development') {
+        // DEVELOPMENT: Include full stack trace for debugging
         errorResponse.stack = err.stack;
+    } else {
+        // ========================================================================
+        // PRODUCTION: Hide all sensitive debugging information
+        // Never expose stack traces, internal error types, or file paths
+        // ========================================================================
+
+        // For 5xx errors: use generic message (never reveal internal structure)
+        if (statusCode >= 500) {
+            errorResponse.error = 'ServerError';
+            errorResponse.message = 'An internal server error occurred';
+            // Never include stack trace in production
+            delete errorResponse.stack;
+        }
+
+        // For 4xx errors: only expose ApiError messages (which are safe)
+        if (statusCode >= 400 && statusCode < 500) {
+            // ApiError messages are intentionally safe (like "Invalid token", "Not Found")
+            // but generic Error details should be hidden from client
+            if (!(err instanceof ApiError)) {
+                errorResponse.message = 'Invalid request';
+                errorResponse.error = 'BadRequest';
+            }
+        }
     }
 
     res.status(statusCode).json(errorResponse);
@@ -89,8 +120,9 @@ const errorHandler = (err, req, res, next) => {
 
 // 404 Not Found middleware
 const notFound = (req, res, next) => {
-    const error = new Error(`Not Found - ${req.originalUrl}`);
-    res.status(404);
+    // Use ApiError instead of generic Error for proper status code handling
+    // SECURITY: Don't expose req.originalUrl in error message (might contain sensitive data)
+    const error = new ApiError(404, 'Resource not found');
     next(error);
 };
 

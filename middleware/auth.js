@@ -63,7 +63,8 @@ const auth = async (req, res, next) => {
                     new ApiError(401, 'Your token has expired! Please log in again')
                 );
             }
-            throw error;
+            // Any other error in token validation → 401
+            return next(new ApiError(401, 'Authentication failed. Please log in again.'));
         }
     } catch (error) {
         logger.error(`Authentication error: ${error.message}`, {
@@ -72,7 +73,8 @@ const auth = async (req, res, next) => {
             ip: req.ip,
             stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
-        next(error);
+        // Ensure auth middleware always returns 401 for auth errors, not 500
+        next(new ApiError(401, 'Authentication failed. Please log in again.'));
     }
 };
 
