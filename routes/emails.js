@@ -62,10 +62,13 @@ router.post('/', contactEmailLimiter, contactValidation, async (req, res) => {
         });
     } catch (error) {
         logger.error('Error submitting contact email:', error);
+        const message = process.env.NODE_ENV === 'development'
+            ? (error && error.message) || 'Failed to submit message'
+            : 'Failed to submit message';
         return res.status(500).json({
             success: false,
             error: 'ServerError',
-            message: error.message || 'Failed to submit message'
+            message
         });
     }
 });

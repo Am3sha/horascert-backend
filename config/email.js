@@ -9,68 +9,207 @@ const createTransporter = () => {
     secure: process.env.EMAIL_SECURE === 'true' || process.env.MAIL_SECURE === 'true', // true for 465, false for other ports
     auth: {
       user: process.env.MAIL_USER || process.env.EMAIL_USER,
-      pass: process.env.MAIL_PASS || process.env.EMAIL_PASS,
+      pass: process.env.MAIL_PASS || process.env.EMAIL_PASS || process.env.EMAIL_PASSWORD,
     },
   });
 };
 
 /**
+ * Helper: Format field for email display
+ * Returns formatted HTML or empty string (doesn't show field if value is falsy)
+ */
+const formatField = (label, value) => {
+  if (!value || value === 'N/A' || value === 'Not specified' || value === 'undefined') {
+    return '';
+  }
+  return `<p><strong>${label}:</strong> ${value}</p>`;
+};
+
+/**
+ * Helper: Build address from components
+ * Only shows non-empty parts, properly formatted
+ */
+const buildAddress = (address1, address2, city, state, postal, country) => {
+  const parts = [address1, address2, city, state, postal, country]
+    .filter(part => part && part.trim() && part !== 'undefined')
+    .join(', ');
+  return parts || null;
+};
+
+/**
  * Send email notification for new application
- * @param {Object} applicationData - Application form data
+ * @param {Object} applicationData - Complete application form data
  * @returns {Promise<Object>} - Email send result
  */
 const sendApplicationEmail = async (applicationData) => {
   try {
     const transporter = createTransporter();
 
-    // Format certifications array
+    // Parse certifications array safely
     const certifications = applicationData.certificationsRequested
-      ? JSON.parse(applicationData.certificationsRequested).join(', ')
-      : 'None specified';
+      ? (typeof applicationData.certificationsRequested === 'string'
+        ? JSON.parse(applicationData.certificationsRequested)
+        : applicationData.certificationsRequested)
+      : [];
+    const certificationsText = Array.isArray(certifications) && certifications.length > 0
+      ? certifications.join(', ')
+      : null;
 
-    // Format email body
-    const emailBody = `
-      <h2>New Certification Application</h2>
-      
-      <h3>Contact Information:</h3>
-      <p><strong>Name:</strong> ${applicationData.name || applicationData.contactPersonName || 'N/A'}</p>
-      <p><strong>Email:</strong> ${applicationData.email || applicationData.contactEmail || 'N/A'}</p>
-      <p><strong>Phone:</strong> ${applicationData.phone || applicationData.contactPhone || 'N/A'}</p>
-      
-      <h3>Company Information:</h3>
-      <p><strong>Company Name:</strong> ${applicationData.companyName || 'N/A'}</p>
-      <p><strong>Address:</strong> ${applicationData.companyAddress || 'N/A'}</p>
-      <p><strong>Industry:</strong> ${applicationData.industry || 'N/A'}</p>
-      <p><strong>Company Size:</strong> ${applicationData.companySize || 'N/A'}</p>
-      <p><strong>Number of Employees:</strong> ${applicationData.numberOfEmployees || 'N/A'}</p>
-      <p><strong>Number of Locations:</strong> ${applicationData.numberOfLocations || 'N/A'}</p>
-      
-      <h3>Contact Person Details:</h3>
-      <p><strong>Name:</strong> ${applicationData.contactPersonName || 'N/A'}</p>
-      <p><strong>Position:</strong> ${applicationData.contactPersonPosition || 'N/A'}</p>
-      <p><strong>Email:</strong> ${applicationData.contactEmail || 'N/A'}</p>
-      <p><strong>Phone:</strong> ${applicationData.contactPhone || 'N/A'}</p>
-      
-      <h3>Certification Details:</h3>
-      <p><strong>Certifications Requested:</strong> ${certifications}</p>
-      <p><strong>Current Certifications:</strong> ${applicationData.currentCertifications || 'None'}</p>
-      <p><strong>Preferred Audit Date:</strong> ${applicationData.preferredAuditDate
-        ? new Date(applicationData.preferredAuditDate).toLocaleDateString()
-        : 'Not specified'}</p>
-      
-      ${applicationData.subject ? `<h3>Subject:</h3><p>${applicationData.subject}</p>` : ''}
-      ${applicationData.message ? `<h3>Message:</h3><p>${applicationData.message}</p>` : ''}
-      ${applicationData.additionalInfo ? `<h3>Additional Information:</h3><p>${applicationData.additionalInfo}</p>` : ''}
-      
-      <hr>
-      <p><small>Submitted on: ${new Date().toLocaleString()}</small></p>
-    `;
+    // Build address from components
+    const formattedAddress = buildAddress(
+      applicationData.addressLine1,
+      applicationData.addressLine2,
+      applicationData.city,
+      applicationData.state,
+      applicationData.postalCode,
+      applicationData.country
+    );
+
+    // ========================================================================
+    // Build email HTML with only non-empty fields
+    // Uses helper functions to avoid N/A and undefined values
+    // ========================================================================
+    let emailHTML = '<h2>New Certification Application</h2>';
+
+    const isYes = (value) => String(value || '').trim().toLowerCase() === 'yes';
+    const yesNoValue = (value) => {
+      const v = String(value || '').trim().toLowerCase();
+      if (v === 'yes') return 'Yes';
+      if (v === 'no') return 'No';
+      return value;
+    };
+
+    // Contact Information Section
+    emailHTML += '<h3>Contact Information:</h3>';
+    emailHTML += formatField('Name', applicationData.contactPersonName || applicationData.name);
+    emailHTML += formatField('Email', applicationData.contactEmail || applicationData.email);
+    emailHTML += formatField('Phone', applicationData.contactPhone || applicationData.phone);
+
+    // Company Information Section
+    emailHTML += '<h3>Company Information:</h3>';
+    emailHTML += formatField('Company Name', applicationData.companyName);
+    emailHTML += formatField('Address', formattedAddress);
+    emailHTML += formatField('Website', applicationData.website);
+    emailHTML += formatField('Telephone', applicationData.telephone);
+    emailHTML += formatField('Fax', applicationData.fax);
+    emailHTML += formatField('Industry', applicationData.industry);
+    emailHTML += formatField('Company Size', applicationData.companySize);
+    emailHTML += formatField('Number of Employees', applicationData.numberOfEmployees);
+    emailHTML += formatField('Number of Locations', applicationData.numberOfLocations);
+
+    // Contact Person Details Section
+    emailHTML += '<h3>Contact Person Details:</h3>';
+    emailHTML += formatField('Name', applicationData.contactPersonName);
+    emailHTML += formatField('Position', applicationData.contactPersonPosition);
+    emailHTML += formatField('Mobile', applicationData.contactPersonMobile);
+    emailHTML += formatField('Email', applicationData.contactPersonEmail);
+
+    // Executive Manager Details Section
+    if (applicationData.executiveManagerName || applicationData.executiveManagerEmail || applicationData.executiveManagerMobile) {
+      emailHTML += '<h3>Executive Manager Details:</h3>';
+      emailHTML += formatField('Name', applicationData.executiveManagerName);
+      emailHTML += formatField('Mobile', applicationData.executiveManagerMobile);
+      emailHTML += formatField('Email', applicationData.executiveManagerEmail);
+    }
+
+    // Certification Details Section
+    emailHTML += '<h3>Certification Details:</h3>';
+    if (certificationsText) {
+      emailHTML += formatField('Certifications Requested', certificationsText);
+    }
+    emailHTML += formatField('Certification Programme', applicationData.certificationProgramme);
+    emailHTML += formatField('Current Certifications', applicationData.currentCertifications);
+    if (applicationData.transferReason) {
+      emailHTML += formatField('Transfer Reason', applicationData.transferReason);
+      emailHTML += formatField('Transfer Expiring Date', applicationData.transferExpiringDate);
+    }
+    if (applicationData.preferredAuditDate) {
+      const auditDate = new Date(applicationData.preferredAuditDate);
+      emailHTML += formatField('Preferred Audit Date', auditDate.toLocaleDateString());
+    }
+
+    // Workforce Details Section
+    if (applicationData.workforceTotalEmployees || applicationData.workforceEmployeesPerShift ||
+      applicationData.workforceNumberOfShifts || applicationData.workforceSeasonalEmployees) {
+      emailHTML += '<h3>Workforce Details:</h3>';
+      emailHTML += formatField('Total Employees', applicationData.workforceTotalEmployees);
+      emailHTML += formatField('Employees Per Shift', applicationData.workforceEmployeesPerShift);
+      emailHTML += formatField('Number of Shifts', applicationData.workforceNumberOfShifts);
+      emailHTML += formatField('Seasonal Employees', applicationData.workforceSeasonalEmployees);
+    }
+
+    // ISO 9001 Details Section
+    if (applicationData.iso9001DesignAndDevelopment || applicationData.iso9001OtherNonApplicableClauses) {
+      emailHTML += '<h3>ISO 9001 Details:</h3>';
+      emailHTML += formatField('Design and Development', yesNoValue(applicationData.iso9001DesignAndDevelopment));
+      emailHTML += formatField('Other Non-Applicable Clauses', yesNoValue(applicationData.iso9001OtherNonApplicableClauses));
+      if (isYes(applicationData.iso9001OtherNonApplicableClauses)) {
+        emailHTML += formatField('Details', applicationData.iso9001OtherNonApplicableClausesText);
+      }
+    }
+
+    // ISO 14001 Details Section
+    if (applicationData.iso14001SitesManaged || applicationData.iso14001RegisterOfSignificantAspects ||
+      applicationData.iso14001EnvironmentalManagementManual || applicationData.iso14001InternalAuditProgramme) {
+      emailHTML += '<h3>ISO 14001 Details:</h3>';
+      emailHTML += formatField('Sites Managed', applicationData.iso14001SitesManaged);
+      emailHTML += formatField('Register of Significant Aspects', yesNoValue(applicationData.iso14001RegisterOfSignificantAspects));
+      emailHTML += formatField('Environmental Management Manual', yesNoValue(applicationData.iso14001EnvironmentalManagementManual));
+      emailHTML += formatField('Internal Audit Programme', yesNoValue(applicationData.iso14001InternalAuditProgramme));
+      if (isYes(applicationData.iso14001InternalAuditProgramme)) {
+        emailHTML += formatField('Internal Audit Implemented', yesNoValue(applicationData.iso14001InternalAuditImplemented));
+      }
+    }
+
+    // ISO 22000 Details Section
+    if (applicationData.iso22000HaccpImplementation || applicationData.iso22000Sites) {
+      emailHTML += '<h3>ISO 22000 Details:</h3>';
+      emailHTML += formatField('HACCP Implementation', yesNoValue(applicationData.iso22000HaccpImplementation));
+      if (isYes(applicationData.iso22000HaccpImplementation)) {
+        emailHTML += formatField('HACCP Studies', applicationData.iso22000HaccpStudies);
+        emailHTML += formatField('Sites', applicationData.iso22000Sites);
+        emailHTML += formatField('Process Lines', applicationData.iso22000ProcessLines);
+        emailHTML += formatField('Processing Type', applicationData.iso22000ProcessingType);
+      }
+    }
+
+    // ISO 45001 Details Section
+    if (applicationData.iso45001HazardsIdentified || applicationData.iso45001CriticalRisks) {
+      emailHTML += '<h3>ISO 45001 Details:</h3>';
+      emailHTML += formatField('Hazards Identified', yesNoValue(applicationData.iso45001HazardsIdentified));
+      if (isYes(applicationData.iso45001HazardsIdentified)) {
+        emailHTML += formatField('Critical Risks', applicationData.iso45001CriticalRisks);
+      }
+    }
+
+    // Uploaded Files Section
+    if (applicationData.uploadedFiles && Array.isArray(applicationData.uploadedFiles) && applicationData.uploadedFiles.length > 0) {
+      emailHTML += '<h3>Uploaded Files:</h3>';
+      emailHTML += '<ul>';
+      applicationData.uploadedFiles.forEach(file => {
+        const fileUrl = (file && file.publicUrl)
+          ? file.publicUrl
+          : `${process.env.API_URL || 'http://localhost:5001'}/api/v1/applications/${applicationData.requestId}/file/${encodeURIComponent(file.storageKey)}`;
+        emailHTML += `<li><a href="${fileUrl}">${file.name}</a> (${file.size ? Math.round(file.size / 1024) + ' KB' : 'unknown size'})</li>`;
+      });
+      emailHTML += '</ul>';
+    }
+
+    // Additional Information Section
+    if (applicationData.additionalInfo) {
+      emailHTML += '<h3>Additional Information:</h3>';
+      emailHTML += `<p>${applicationData.additionalInfo.replace(/\n/g, '<br>')}</p>`;
+    }
+
+    // Footer
+    emailHTML += '<hr>';
+    emailHTML += `<p><small>Submitted on: ${new Date().toLocaleString()}</small></p>`;
 
     const mailOptions = {
       from: `"HORAS-Cert Website" <${process.env.EMAIL_FROM || process.env.MAIL_USER || process.env.EMAIL_USER}>`,
       to: process.env.EMAIL_TO || 'info@horascert.com',
       subject: 'New Certification Application',
-      html: emailBody,
+      html: emailHTML,
     };
 
     const info = await transporter.sendMail(mailOptions);
@@ -108,7 +247,7 @@ const sendContactEmail = async (contactData) => {
     `;
 
     const mailOptions = {
-      from: `"HORAS-Cert Website" <${process.env.EMAIL_FROM || process.env.MAIL_USER || process.env.EMAIL_USER}>`,
+      from: `"HORA Website" <${process.env.EMAIL_FROM || process.env.MAIL_USER || process.env.EMAIL_USER}>`,
       to: process.env.EMAIL_TO || 'info@horascert.com',
       subject: `Contact Form: ${contactData.subject}`,
       html: emailBody,

@@ -474,7 +474,10 @@ const deleteCertificateByCertificateId = async (req, res) => {
         return res.json({ success: true });
     } catch (err) {
         logger.error('Error deleting certificate by certificateId:', err);
-        return res.status(500).json({ success: false, error: 'ServerError', message: err.message });
+        const message = process.env.NODE_ENV === 'development'
+            ? (err && err.message) || 'An internal server error occurred'
+            : 'An internal server error occurred';
+        return res.status(500).json({ success: false, error: 'ServerError', message });
     }
 };
 
@@ -540,7 +543,10 @@ const updateCertificateByCertificateId = async (req, res) => {
         return res.json({ success: true, data: normalizeCertificateStatus(cert.toObject ? cert.toObject() : cert) });
     } catch (err) {
         logger.error('Error updating certificate by certificateId:', err);
-        return res.status(500).json({ success: false, error: 'ServerError', message: err.message });
+        const message = process.env.NODE_ENV === 'development'
+            ? (err && err.message) || 'An internal server error occurred'
+            : 'An internal server error occurred';
+        return res.status(500).json({ success: false, error: 'ServerError', message });
     }
 };
 

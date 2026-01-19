@@ -97,9 +97,12 @@ router.get('/applications/:id', async (req, res) => {
 
     } catch (error) {
         logger.error('Error fetching application:', error);
+        const safeError = process.env.NODE_ENV === 'development'
+            ? (error && error.message) || 'Failed to fetch application'
+            : 'Failed to fetch application';
         res.status(500).json({
             success: false,
-            error: error.message || 'Failed to fetch application'
+            error: safeError
         });
     }
 });
@@ -245,25 +248,45 @@ router.get('/applications/:id/files/:fileIndex', async (req, res) => {
                 originalError: urlError.originalError
             });
 
-            return res.status(404).json({
-                success: false,
-                error: 'File unavailable',
-                message: 'Could not generate a signed URL for this file. The object may be missing or the storage key is invalid.',
-                debug: {
+            const debug = process.env.NODE_ENV === 'development'
+                ? {
                     bucket: urlError.bucket || file.bucket || process.env.STORAGE_BUCKET,
                     storageKey: file.storageKey,
                     code: urlError.code,
                     errorMessage: urlError.message
                 }
+                : {
+                    bucket: urlError.bucket || file.bucket || process.env.STORAGE_BUCKET,
+                    storageKey: file.storageKey,
+                    code: urlError.code,
+                    errorMessage: 'Unavailable'
+                };
+
+            return res.status(404).json({
+                success: false,
+                error: 'File unavailable',
+                message: 'Could not generate a signed URL for this file. The object may be missing or the storage key is invalid.',
+                debug
             });
         }
 
     } catch (error) {
         logger.error('Error generating file URL:', error);
-        return res.status(500).json({
+        const safeError = process.env.NODE_ENV === 'development'
+            ? (error && error.message) || 'Failed to generate file URL'
+            : 'Failed to generate file URL';
+
+        const response = {
             success: false,
-            error: error.message || 'Failed to generate file URL',
-            debug: { errorMessage: error.message }
+            error: safeError
+        };
+
+        if (process.env.NODE_ENV === 'development') {
+            response.debug = { errorMessage: (error && error.message) || safeError };
+        }
+
+        return res.status(500).json({
+            ...response
         });
     }
 });
@@ -346,10 +369,13 @@ router.get('/debug/storage/:requestId', async (req, res) => {
         });
     } catch (error) {
         logger.error('Debug storage endpoint error:', error);
+        const message = process.env.NODE_ENV === 'development'
+            ? error.message || 'Failed to debug storage'
+            : 'Failed to debug storage';
         return res.status(500).json({
             success: false,
             error: 'ServerError',
-            message: error.message || 'Failed to debug storage'
+            message
         });
     }
 });
@@ -424,11 +450,16 @@ router.delete('/applications/:applicationId', async (req, res) => {
                             storageKey,
                             error: err.message
                         });
+
+                        const clientError = process.env.NODE_ENV === 'development'
+                            ? err.message
+                            : 'Deletion failed';
+
                         deletionResults.push({
                             ok: false,
                             bucket,
                             storageKey,
-                            error: err.message
+                            error: clientError
                         });
                     }
                 })
@@ -451,7 +482,10 @@ router.delete('/applications/:applicationId', async (req, res) => {
         });
     } catch (err) {
         logger.error(err);
-        return res.status(500).json({ success: false, error: err.message || 'Failed to delete application' });
+        const safeError = process.env.NODE_ENV === 'development'
+            ? (err && err.message) || 'Failed to delete application'
+            : 'Failed to delete application';
+        return res.status(500).json({ success: false, error: safeError });
     }
 });
 
@@ -567,9 +601,12 @@ router.post('/emails/:id/reply', async (req, res) => {
 
     } catch (error) {
         logger.error('Error replying to email:', error);
+        const safeError = process.env.NODE_ENV === 'development'
+            ? (error && error.message) || 'Failed to send reply'
+            : 'Failed to send reply';
         res.status(500).json({
             success: false,
-            error: error.message || 'Failed to send reply'
+            error: safeError
         });
     }
 });
@@ -621,7 +658,10 @@ router.delete('/emails/:emailId', async (req, res) => {
         return res.json({ success: true });
     } catch (err) {
         logger.error(err);
-        return res.status(500).json({ success: false, error: err.message || 'Failed to delete email' });
+        const safeError = process.env.NODE_ENV === 'development'
+            ? (err && err.message) || 'Failed to delete email'
+            : 'Failed to delete email';
+        return res.status(500).json({ success: false, error: safeError });
     }
 });
 

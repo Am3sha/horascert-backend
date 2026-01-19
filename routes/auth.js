@@ -76,7 +76,7 @@ router.post(
                     // Set cookie with proper configuration for cross-domain (Vercel ↔ Railway)
                     res.cookie('token', token, {
                         httpOnly: true,
-                        secure: true, // Always true in production (HTTPS required)
+                        secure: process.env.NODE_ENV === 'production',
                         sameSite: 'none', // Allow cross-site cookie sending
                         maxAge: 4 * 60 * 60 * 1000, // 4 hours
                         path: '/', // Available on all paths
@@ -120,9 +120,9 @@ router.post('/logout', auth, (req, res) => {
 router.get('/verify', (req, res) => {
     try {
         // Get token from header or cookie
-        const headerToken = req.header('Authorization')?.replace('Bearer ', '');
-        const cookieToken = req.cookies?.token;
-        const token = headerToken || cookieToken;
+        const headerToken = req.header('Authorization')?.replace('Bearer ', '')?.trim();
+        const cookieToken = (req.cookies?.token || '').trim();
+        const token = (headerToken || cookieToken || '').trim();
 
         if (!token) {
             return res.status(401).json({ success: false, error: 'AuthError', message: 'No token, authorization denied' });

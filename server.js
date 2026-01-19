@@ -1,6 +1,9 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const compression = require('compression');
+const mongoSanitize = require('express-mongo-sanitize');
 const cookieParser = require('cookie-parser');
 const connectDB = require('./config/db');
 const logger = require('./utils/logger');
@@ -14,7 +17,7 @@ const certificatesRouter = require('./routes/certificates');
 const emailsRouter = require('./routes/emails');
 
 // Import centralized error handler
-const { errorHandler, notFound } = require('./middleware/errorHandler');
+const { ApiError, errorHandler, notFound } = require('./middleware/errorHandler');
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -26,6 +29,25 @@ connectDB();
 // Must come BEFORE any middleware that reads X-Forwarded-For, X-Forwarded-Proto, etc.
 app.set('trust proxy', 1);
 
+// Remove identifying header
+app.disable('x-powered-by');
+
+// Security headers (kept conservative to avoid breaking React/Vercel/Supabase flows)
+app.use(helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: false,
+    strictTransportSecurity: process.env.NODE_ENV === 'production'
+        ? { maxAge: 15552000, includeSubDomains: true }
+        : false
+}));
+
+// Response compression
+app.use(compression());
+
+// Basic NoSQL injection hardening
+app.use(mongoSanitize());
+
 // Middleware - CORS, JSON parsers
 app.use(cors({
     origin: function (origin, callback) {
@@ -33,19 +55,22 @@ app.use(cors({
         const allowedOrigins = [
             'https://horascert.com',
             'https://www.horascert.com',
-            'https://horascert-frontend.vercel.app/',
+            'https://horascert-frontend.vercel.app',
             'http://localhost:3000',
             'http://127.0.0.1:3000',
-            origin // Also allow the requesting origin
         ];
 
         // Check if origin is in allowed list
-        if (!origin || allowedOrigins.includes(origin)) {
-            callback(null, origin || true);
-        } else {
-            // Still allow the request, but don't expose credentials
-            callback(null, false);
+        if (!origin) {
+            // Allow requests with no origin (Postman, server-to-server, etc.)
+            return callback(null, true);
         }
+
+        if (allowedOrigins.includes(origin)) {
+            return callback(null, true);
+        }
+
+        return callback(new ApiError(403, 'Not allowed by CORS'));
     },
     credentials: true, // Allow credentials (cookies, auth headers)
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
@@ -118,11 +143,24 @@ app.use((err, req, res, next) => {
         });
     }
 
+    // Allow the centralized error handler to return the correct status for known 4xx errors
+    if (err && (err instanceof ApiError || (err.statusCode && err.statusCode < 500) || (err.status && err.status < 500))) {
+        return next(err);
+    }
+
     if (err) {
-        return res.status(500).json({
+        const response = {
             success: false,
             message: 'Internal server error',
-            details: err.message
+            details: null
+        };
+
+        if (process.env.NODE_ENV === 'development') {
+            response.details = err.message;
+        }
+
+        return res.status(500).json({
+            ...response
         });
     }
 
