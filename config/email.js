@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const https = require('https');
 const logger = require('../utils/logger');
 
 // Create reusable transporter object using SMTP transport
@@ -12,6 +13,96 @@ const createTransporter = () => {
       pass: process.env.MAIL_PASS || process.env.EMAIL_PASS || process.env.EMAIL_PASSWORD,
     },
   });
+};
+
+const RESEND_API_HOST = 'api.resend.com';
+
+const getRecipients = () => {
+  const raw = String(process.env.EMAIL_TO || 'info@horascert.com');
+  const recipients = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return recipients.length > 1 ? recipients : recipients[0];
+};
+
+const getFromAddress = (displayName) => {
+  const fromEmail = process.env.EMAIL_FROM || process.env.MAIL_USER || process.env.EMAIL_USER;
+  if (!fromEmail) return null;
+  if (displayName) {
+    return `"${displayName}" <${fromEmail}>`;
+  }
+  return String(fromEmail);
+};
+
+const sendWithResend = async ({ from, to, subject, html }) => {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    throw new Error('RESEND_API_KEY is not set');
+  }
+
+  const payload = JSON.stringify({ from, to, subject, html });
+
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        method: 'POST',
+        host: RESEND_API_HOST,
+        path: '/emails',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload)
+        },
+        timeout: 30_000
+      },
+      (res) => {
+        let data = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+        res.on('end', () => {
+          try {
+            const parsed = data ? JSON.parse(data) : null;
+            if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+              resolve(parsed);
+              return;
+            }
+
+            const message =
+              (parsed && parsed.message) ||
+              (parsed && parsed.error && parsed.error.message) ||
+              `Resend API error (${res.statusCode || 'unknown'})`;
+            reject(new Error(message));
+          } catch (e) {
+            reject(new Error(`Resend API invalid response (${res.statusCode || 'unknown'})`));
+          }
+        });
+      }
+    );
+
+    req.on('timeout', () => {
+      req.destroy(new Error('Resend request timeout'));
+    });
+
+    req.on('error', (err) => {
+      reject(err);
+    });
+
+    req.write(payload);
+    req.end();
+  });
+};
+
+const sendEmail = async ({ from, to, subject, html }) => {
+  if (process.env.RESEND_API_KEY) {
+    const result = await sendWithResend({ from, to, subject, html });
+    return { messageId: result && result.id };
+  }
+
+  const transporter = createTransporter();
+  return transporter.sendMail({ from, to, subject, html });
 };
 
 /**
@@ -43,8 +134,6 @@ const buildAddress = (address1, address2, city, state, postal, country) => {
  */
 const sendApplicationEmail = async (applicationData) => {
   try {
-    const transporter = createTransporter();
-
     // Parse certifications array safely
     const certifications = applicationData.certificationsRequested
       ? (typeof applicationData.certificationsRequested === 'string'
@@ -205,14 +294,19 @@ const sendApplicationEmail = async (applicationData) => {
     emailHTML += '<hr>';
     emailHTML += `<p><small>Submitted on: ${new Date().toLocaleString()}</small></p>`;
 
+    const from = getFromAddress('HORAS-Cert Website');
+    if (!from) {
+      throw new Error('EMAIL_FROM is not set');
+    }
+
     const mailOptions = {
-      from: `"HORAS-Cert Website" <${process.env.EMAIL_FROM || process.env.MAIL_USER || process.env.EMAIL_USER}>`,
-      to: process.env.EMAIL_TO || 'info@horascert.com',
+      from,
+      to: getRecipients(),
       subject: 'New Certification Application',
       html: emailHTML,
     };
 
-    const info = await transporter.sendMail(mailOptions);
+    const info = await sendEmail(mailOptions);
     return { success: true, messageId: info.messageId };
   } catch (error) {
     logger.error('Error sending application email:', error);
@@ -227,8 +321,6 @@ const sendApplicationEmail = async (applicationData) => {
  */
 const sendContactEmail = async (contactData) => {
   try {
-    const transporter = createTransporter();
-
     const emailBody = `
       <h2>New Contact Form Submission</h2>
       
@@ -246,14 +338,19 @@ const sendContactEmail = async (contactData) => {
       <p><small>Submitted on: ${new Date().toLocaleString()}</small></p>
     `;
 
+    const from = getFromAddress('HORA Website');
+    if (!from) {
+      throw new Error('EMAIL_FROM is not set');
+    }
+
     const mailOptions = {
-      from: `"HORA Website" <${process.env.EMAIL_FROM || process.env.MAIL_USER || process.env.EMAIL_USER}>`,
-      to: process.env.EMAIL_TO || 'info@horascert.com',
+      from,
+      to: getRecipients(),
       subject: `Contact Form: ${contactData.subject}`,
       html: emailBody,
     };
 
-    const info = await transporter.sendMail(mailOptions);
+    const info = await sendEmail(mailOptions);
     return { success: true, messageId: info.messageId };
   } catch (error) {
     logger.error('Error sending contact email:', error);
@@ -268,8 +365,6 @@ const sendContactEmail = async (contactData) => {
  */
 const sendCertificateNotification = async (certificate) => {
   try {
-    const transporter = createTransporter();
-
     const emailBody = `
       <h2>New Certificate Created</h2>
       
@@ -286,14 +381,19 @@ const sendCertificateNotification = async (certificate) => {
       <p><small>Created on: ${new Date().toLocaleString()}</small></p>
     `;
 
+    const from = getFromAddress('Horascert.com');
+    if (!from) {
+      throw new Error('EMAIL_FROM is not set');
+    }
+
     const mailOptions = {
-      from: `"Horascert.com " <${process.env.EMAIL_FROM || process.env.MAIL_USER || process.env.EMAIL_USER}>`,
-      to: process.env.EMAIL_TO || 'info@horascert.com',
+      from,
+      to: getRecipients(),
       subject: `New Certificate Created: ${certificate.certificateNumber}`,
       html: emailBody,
     };
 
-    const info = await transporter.sendMail(mailOptions);
+    const info = await sendEmail(mailOptions);
     return { success: true, messageId: info.messageId };
   } catch (error) {
     logger.error('Error sending certificate notification email:', error);
