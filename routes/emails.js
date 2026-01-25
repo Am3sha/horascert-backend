@@ -1,7 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const Email = require('../models/Email');
-const { sendContactEmail } = require('../config/email');
+const { sendContactEmail, sendContactAutoReplyToClient } = require('../config/email');
 const { contactEmailLimiter } = require('../middleware/rateLimiters');
 const logger = require('../utils/logger');
 
@@ -43,6 +43,32 @@ router.post('/', contactEmailLimiter, contactValidation, async (req, res) => {
         res.status(201).json({
             success: true,
             emailId: created._id,
+        });
+
+        // 🔄 Send auto-reply to client in background (non-blocking)
+        // Must not affect admin email behavior or API response
+        setImmediate(async () => {
+            try {
+                const result = await sendContactAutoReplyToClient({
+                    to: email,
+                    name
+                });
+
+                if (result && result.success) {
+                    logger.info('Auto-reply email sent to client for contact form', {
+                        emailId: created._id,
+                        to: email
+                    });
+                } else {
+                    logger.warn('Failed to send auto-reply email to client for contact form', {
+                        emailId: created._id,
+                        to: email,
+                        error: result && result.error
+                    });
+                }
+            } catch (err) {
+                logger.error('Failed to send auto-reply email to client for contact form:', err);
+            }
         });
 
         // 🔄 Send email notification in background (non-blocking)

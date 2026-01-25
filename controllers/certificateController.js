@@ -333,7 +333,40 @@ const updateCertificate = async (req, res, next) => {
             return next(new ApiError(403, 'Not authorized to update this certificate'));
         }
 
-        const updates = { ...(req.body || {}) };
+        const allowedFields = [
+            'certificateNumber',
+            'companyName',
+            'companyAddress',
+            'standard',
+            'standardDescription',
+            'scope',
+            'issueDate',
+            'expiryDate',
+            'firstIssueDate',
+            'status',
+            'adminNotes'
+        ];
+
+        const updates = {};
+        for (const key of allowedFields) {
+            if (Object.prototype.hasOwnProperty.call(req.body || {}, key)) {
+                updates[key] = req.body[key];
+            }
+        }
+
+        if (typeof updates.companyAddress === 'string') {
+            const addr = updates.companyAddress;
+            updates.companyAddress = {
+                fullAddress: addr,
+                street: addr.split(',')[0] || '',
+                city: addr.split(',')[1] ? addr.split(',')[1].trim() : '',
+                country: 'Egypt'
+            };
+        }
+
+        if (updates.issueDate) updates.issueDate = new Date(updates.issueDate);
+        if (updates.expiryDate) updates.expiryDate = new Date(updates.expiryDate);
+        if (updates.firstIssueDate) updates.firstIssueDate = new Date(updates.firstIssueDate);
 
         certificate = await Certificate.findByIdAndUpdate(req.params.id, updates, {
             new: true,

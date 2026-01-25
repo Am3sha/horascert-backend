@@ -1,7 +1,7 @@
 const express = require('express');
 const multer = require('multer');
 const { body, validationResult } = require('express-validator');
-const { sendApplicationEmail, sendContactEmail } = require('../config/email');
+const { sendApplicationEmail, sendContactEmail, sendApplicationReceivedToClient } = require('../config/email');
 const { applicationLimiter, contactEmailLimiter } = require('../middleware/rateLimiters');
 const Request = require('../models/Request');
 const Email = require('../models/Email');
@@ -14,13 +14,19 @@ const router = express.Router();
 // Configure multer for file uploads (memory storage)
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB per file
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB per file
   fileFilter: (req, file, cb) => {
-    const allowedMimes = ['application/pdf', 'image/jpeg', 'image/png'];
+    const allowedMimes = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'image/jpeg',
+      'image/png'
+    ];
     if (allowedMimes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Only PDF, JPEG, and PNG files are allowed'));
+      cb(new Error('Only PDF, DOC, DOCX, JPEG, and PNG files are allowed'));
     }
   }
 });
@@ -55,7 +61,7 @@ const contactValidation = [
  * POST /api/applications
  * Submit a new certification application with file uploads
  */
-router.post('/', upload.array('file', 10), applicationValidation, async (req, res) => {
+router.post('/', applicationLimiter, upload.array('file', 3), applicationValidation, async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -395,6 +401,32 @@ router.post('/', upload.array('file', 10), applicationValidation, async (req, re
       success: true,
       message: 'Application submitted successfully',
       requestId: savedRequest._id,
+    });
+
+    // 🔄 Send confirmation email to client in background (non-blocking)
+    // Must not affect admin email behavior or API response
+    setImmediate(async () => {
+      try {
+        const result = await sendApplicationReceivedToClient({
+          to: resolvedContactEmail,
+          requestId: savedRequest._id.toString(),
+        });
+
+        if (result && result.success) {
+          logger.info('Confirmation email sent to client for application', {
+            requestId: savedRequest._id,
+            to: resolvedContactEmail
+          });
+        } else {
+          logger.warn('Failed to send confirmation email to client for application', {
+            requestId: savedRequest._id,
+            to: resolvedContactEmail,
+            error: result && result.error
+          });
+        }
+      } catch (err) {
+        logger.error('Failed to send confirmation email to client for application:', err);
+      }
     });
 
     // 🔄 Send email notification in background (non-blocking)

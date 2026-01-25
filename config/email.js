@@ -1,5 +1,6 @@
 const nodemailer = require('nodemailer');
 const https = require('https');
+const he = require('he');
 const logger = require('../utils/logger');
 
 // Create reusable transporter object using SMTP transport
@@ -113,7 +114,9 @@ const formatField = (label, value) => {
   if (!value || value === 'N/A' || value === 'Not specified' || value === 'undefined') {
     return '';
   }
-  return `<p><strong>${label}:</strong> ${value}</p>`;
+
+  const safeValue = he.encode(String(value), { useNamedReferences: true });
+  return `<p><strong>${label}:</strong> ${safeValue}</p>`;
 };
 
 /**
@@ -125,6 +128,11 @@ const buildAddress = (address1, address2, city, state, postal, country) => {
     .filter(part => part && part.trim() && part !== 'undefined')
     .join(', ');
   return parts || null;
+};
+
+const escapeHtml = (value) => {
+  if (value === null || value === undefined) return '';
+  return he.encode(String(value), { useNamedReferences: true });
 };
 
 /**
@@ -279,7 +287,7 @@ const sendApplicationEmail = async (applicationData) => {
         const fileUrl = (file && file.publicUrl)
           ? file.publicUrl
           : `${process.env.API_URL || 'http://localhost:5001'}/api/v1/applications/${applicationData.requestId}/file/${encodeURIComponent(file.storageKey)}`;
-        emailHTML += `<li><a href="${fileUrl}">${file.name}</a> (${file.size ? Math.round(file.size / 1024) + ' KB' : 'unknown size'})</li>`;
+        emailHTML += `<li><a href="${escapeHtml(fileUrl)}">${escapeHtml(file.name)}</a> (${file.size ? Math.round(file.size / 1024) + ' KB' : 'unknown size'})</li>`;
       });
       emailHTML += '</ul>';
     }
@@ -287,7 +295,7 @@ const sendApplicationEmail = async (applicationData) => {
     // Additional Information Section
     if (applicationData.additionalInfo) {
       emailHTML += '<h3>Additional Information:</h3>';
-      emailHTML += `<p>${applicationData.additionalInfo.replace(/\n/g, '<br>')}</p>`;
+      emailHTML += `<p>${escapeHtml(applicationData.additionalInfo).replace(/\n/g, '<br>')}</p>`;
     }
 
     // Footer
@@ -314,6 +322,117 @@ const sendApplicationEmail = async (applicationData) => {
   }
 };
 
+const sendApplicationReceivedToClient = async ({ to, requestId }) => {
+  try {
+    if (!to) {
+      return { success: false, error: 'Recipient email is required' };
+    }
+
+    const from = getFromAddress('HORAS Cert');
+    if (!from) {
+      throw new Error('EMAIL_FROM is not set');
+    }
+
+    const safeRequestId = requestId ? escapeHtml(String(requestId)) : '';
+
+    const emailBody = `
+      <h2>We have received your application</h2>
+      <p>Thank you for submitting your application. Our team will review it and contact you soon.</p>
+      <p><strong>Request Number:</strong> ${safeRequestId}</p>
+      <p><strong>Current Status:</strong> Pending</p>
+      <hr>
+      <p><small>This is an automated confirmation message. Please do not reply.</small></p>
+    `;
+
+    const mailOptions = {
+      from,
+      to,
+      subject: 'We have received your application',
+      html: emailBody,
+    };
+
+    const info = await sendEmail(mailOptions);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    logger.error('Error sending application received email to client:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+const sendContactAutoReplyToClient = async ({ to, name }) => {
+  try {
+    if (!to) {
+      return { success: false, error: 'Recipient email is required' };
+    }
+
+    const from = getFromAddress('HORAS-Cert Website');
+    if (!from) {
+      throw new Error('EMAIL_FROM is not set');
+    }
+
+    const safeName = name ? escapeHtml(String(name)) : '';
+
+    const emailBody = `
+      <h2>We received your message</h2>
+      <p>Thank you${safeName ? `, ${safeName}` : ''}. We have received your message and our team will reply as soon as possible.</p>
+      <hr>
+      <p><small>This is an automated message. Please do not reply.</small></p>
+    `;
+
+    const mailOptions = {
+      from,
+      to,
+      subject: 'We received your message',
+      html: emailBody,
+    };
+
+    const info = await sendEmail(mailOptions);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    logger.error('Error sending contact auto-reply email to client:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+const sendApplicationStatusUpdateToClient = async ({ to, requestId, oldStatus, newStatus }) => {
+  try {
+    if (!to) {
+      return { success: false, error: 'Recipient email is required' };
+    }
+
+    const from = getFromAddress('HORAS-Cert Website');
+    if (!from) {
+      throw new Error('EMAIL_FROM is not set');
+    }
+
+    const safeRequestId = requestId ? escapeHtml(String(requestId)) : '';
+    const safeOldStatus = oldStatus ? escapeHtml(String(oldStatus)) : '';
+    const safeNewStatus = newStatus ? escapeHtml(String(newStatus)) : '';
+
+    const emailBody = `
+      <h2>Your application status has been updated</h2>
+      <p><strong>Request Number:</strong> ${safeRequestId}</p>
+      <p><strong>Previous Status:</strong> ${safeOldStatus}</p>
+      <p><strong>New Status:</strong> ${safeNewStatus}</p>
+      <hr>
+      <p><small>This is an automated notification message. Please do not reply.</small></p>
+    `;
+
+    const mailOptions = {
+      from,
+      to,
+      subject: 'Your application status has been updated',
+      html: emailBody,
+    };
+
+    const info = await sendEmail(mailOptions);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    logger.error('Error sending application status update email to client:', error);
+    return { success: false, error: error.message };
+  }
+};
+
 /**
  * Send contact form email
  * @param {Object} contactData - Contact form data
@@ -321,18 +440,24 @@ const sendApplicationEmail = async (applicationData) => {
  */
 const sendContactEmail = async (contactData) => {
   try {
+    const safeName = escapeHtml(contactData.name);
+    const safeEmail = escapeHtml(contactData.email);
+    const safePhone = contactData.phone ? escapeHtml(contactData.phone) : 'N/A';
+    const safeSubject = escapeHtml(contactData.subject);
+    const safeMessage = escapeHtml(contactData.message).replace(/\n/g, '<br>');
+
     const emailBody = `
       <h2>New Contact Form Submission</h2>
       
       <h3>Contact Information:</h3>
-      <p><strong>Name:</strong> ${contactData.name}</p>
-      <p><strong>Email:</strong> ${contactData.email}</p>
-      <p><strong>Phone:</strong> ${contactData.phone || 'N/A'}</p>
+      <p><strong>Name:</strong> ${safeName}</p>
+      <p><strong>Email:</strong> ${safeEmail}</p>
+      <p><strong>Phone:</strong> ${safePhone}</p>
       
       <h3>Message Details:</h3>
-      <p><strong>Subject:</strong> ${contactData.subject}</p>
+      <p><strong>Subject:</strong> ${safeSubject}</p>
       <p><strong>Message:</strong></p>
-      <p>${contactData.message.replace(/\n/g, '<br>')}</p>
+      <p>${safeMessage}</p>
       
       <hr>
       <p><small>Submitted on: ${new Date().toLocaleString()}</small></p>
@@ -346,7 +471,7 @@ const sendContactEmail = async (contactData) => {
     const mailOptions = {
       from,
       to: getRecipients(),
-      subject: `Contact Form: ${contactData.subject}`,
+      subject: `Contact Form: ${String(contactData.subject || '')}`,
       html: emailBody,
     };
 
@@ -404,5 +529,8 @@ const sendCertificateNotification = async (certificate) => {
 module.exports = {
   sendApplicationEmail,
   sendContactEmail,
-  sendCertificateNotification
+  sendCertificateNotification,
+  sendApplicationReceivedToClient,
+  sendContactAutoReplyToClient,
+  sendApplicationStatusUpdateToClient
 };

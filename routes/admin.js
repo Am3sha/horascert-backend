@@ -5,6 +5,7 @@ const { createClient } = require('@supabase/supabase-js');
 const logger = require('../utils/logger');
 const { auth, restrictTo } = require('../middleware/auth');
 const { getSignedFileUrl, deleteFile } = require('../services/supabaseStorage');
+const { updateApplicationAdmin } = require('../controllers/applicationController');
 
 const Request = require('../models/Request');
 const Email = require('../models/Email');
@@ -108,19 +109,7 @@ router.get('/applications/:id', async (req, res) => {
 });
 
 // PUT /api/v1/admin/applications/:id
-router.put('/applications/:id', async (req, res) => {
-    try {
-        const app = await Request.findById(req.params.id);
-        if (!app) return res.status(404).json({ success: false, error: 'Application not found' });
-        if (req.body.status) app.status = req.body.status;
-        if (req.body.adminNotes) app.adminNotes = req.body.adminNotes;
-        await app.save();
-        res.json({ success: true, data: app });
-    } catch (err) {
-        logger.error(err);
-        res.status(500).json({ success: false, error: 'Failed to update application' });
-    }
-});
+router.put('/applications/:id', updateApplicationAdmin);
 
 // GET /api/v1/admin/applications/:id/files/:fileIndex - Get signed URL for file preview
 router.get('/applications/:id/files/:fileIndex', async (req, res) => {

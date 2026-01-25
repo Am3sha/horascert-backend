@@ -16,6 +16,8 @@ const adminRouter = require('./routes/admin');
 const certificatesRouter = require('./routes/certificates');
 const emailsRouter = require('./routes/emails');
 
+const csrfCheck = require('./middleware/csrfCheck');
+
 // Import centralized error handler
 const { ApiError, errorHandler, notFound } = require('./middleware/errorHandler');
 
@@ -115,9 +117,9 @@ app.get('/', (req, res) => {
 
 // API Routes - v1 prefix
 app.use('/api/v1/auth', authRouter);
-app.use('/api/v1/applications', applicationsRouter);
-app.use('/api/v1/admin', adminRouter);
-app.use('/api/v1/certificates', certificatesRouter);
+app.use('/api/v1/applications', csrfCheck, applicationsRouter);
+app.use('/api/v1/admin', csrfCheck, adminRouter);
+app.use('/api/v1/certificates', csrfCheck, certificatesRouter);
 app.use('/api/v1/emails', emailsRouter);
 
 // Legacy support: /api/applications without v1 prefix
@@ -135,7 +137,9 @@ app.use((err, req, res, next) => {
     if (err && err.name === 'MulterError') {
         const message = err.code === 'LIMIT_FILE_SIZE'
             ? 'File too large. Please upload smaller files.'
-            : 'File upload failed. Please check file type and try again.';
+            : err.code === 'LIMIT_UNEXPECTED_FILE'
+                ? 'Too many files. You can upload up to 3 files.'
+                : 'File upload failed. Please check file type and try again.';
 
         return res.status(400).json({
             success: false,
