@@ -251,150 +251,6 @@ router.post('/', applicationLimiter, upload.array('file', 3), applicationValidat
       });
     }
 
-    // Handle file uploads if files were provided
-    const uploadedFiles = req.files || [];
-    const uploaded = [];
-
-    if (uploadedFiles.length > 0) {
-      for (const file of uploadedFiles) {
-        try {
-          const result = await uploadFile(
-            file.buffer,
-            file.originalname,
-            file.mimetype,
-            savedRequest._id.toString()
-          );
-          uploaded.push({
-            name: file.originalname,
-            storageKey: result.storageKey,
-            bucket: result.bucket,
-            mimeType: result.mimeType,
-            size: result.size,
-            isPublic: result.isPublic
-          });
-          logger.info('File uploaded for application', {
-            requestId: savedRequest._id,
-            fileName: file.originalname,
-            size: file.size
-          });
-        } catch (fileErr) {
-          logger.warn('Failed to upload application file', {
-            requestId: savedRequest._id,
-            fileName: file.originalname,
-            error: fileErr && fileErr.message
-          });
-        }
-      }
-
-      if (uploaded.length > 0) {
-        try {
-          savedRequest.files = uploaded;
-          await savedRequest.save();
-          logger.info('Files metadata saved to application', {
-            requestId: savedRequest._id,
-            fileCount: uploaded.length
-          });
-        } catch (saveErr) {
-          logger.warn('Failed to save uploaded file metadata to request', {
-            requestId: savedRequest._id,
-            error: saveErr && saveErr.message
-          });
-        }
-      }
-    }
-
-    // Prepare complete data for email notification
-    // Include ALL form data (not just subset) + uploaded files
-    const applicationData = {
-      // Request ID (needed for file URL generation)
-      requestId: savedRequest._id.toString(),
-
-      // Contact Information
-      name: contactPersonName,
-      email: resolvedContactEmail,
-      phone: resolvedContactPhone,
-
-      // Company Information
-      companyName,
-      companyAddress: resolvedCompanyAddress,
-      addressLine1,
-      addressLine2,
-      city,
-      state,
-      postalCode,
-      country,
-      website,
-      telephone,
-      fax,
-      industry,
-      companySize,
-      numberOfEmployees: numberOfEmployees?.toString(),
-      numberOfLocations: numberOfLocations?.toString(),
-
-      // Contact Person Details
-      contactPersonName,
-      contactPersonPosition,
-      contactPersonMobile: contactPersonMobile || contactPersonPhone,
-      contactPersonEmail,
-      contactEmail: resolvedContactEmail,
-      contactPhone: resolvedContactPhone,
-
-      // Executive Manager Details
-      executiveManagerName,
-      executiveManagerMobile,
-      executiveManagerEmail,
-
-      // Workforce Details
-      workforceTotalEmployees,
-      workforceEmployeesPerShift,
-      workforceNumberOfShifts,
-      workforceSeasonalEmployees,
-
-      // ISO 9001 Details
-      iso9001DesignAndDevelopment,
-      iso9001OtherNonApplicableClauses,
-      iso9001OtherNonApplicableClausesText,
-
-      // ISO 14001 Details
-      iso14001SitesManaged,
-      iso14001RegisterOfSignificantAspects,
-      iso14001EnvironmentalManagementManual,
-      iso14001InternalAuditProgramme,
-      iso14001InternalAuditImplemented,
-
-      // ISO 22000 Details
-      iso22000HaccpImplementation,
-      iso22000HaccpStudies,
-      iso22000Sites,
-      iso22000ProcessLines,
-      iso22000ProcessingType,
-
-      // ISO 45001 Details
-      iso45001HazardsIdentified,
-      iso45001CriticalRisks,
-
-      // Certification Details
-      certificationsRequested: JSON.stringify(parsedStandards),
-      certificationProgramme,
-      currentCertifications,
-      preferredAuditDate,
-      transferReason,
-      transferExpiringDate,
-
-      // Additional Information
-      additionalInfo,
-
-      // Uploaded Files (IMPORTANT: Include file metadata)
-      uploadedFiles: uploaded.map(file => ({
-        name: file.name,
-        storageKey: file.storageKey,
-        bucket: file.bucket,
-        mimeType: file.mimeType,
-        size: file.size,
-        publicUrl: ''
-      })) || []
-    };
-
     // ✅ Return success IMMEDIATELY - application is saved to database!
     // This is critical for UX: user gets instant feedback
     res.status(201).json({
@@ -403,74 +259,228 @@ router.post('/', applicationLimiter, upload.array('file', 3), applicationValidat
       requestId: savedRequest._id,
     });
 
-    // 🔄 Send confirmation email to client in background (non-blocking)
-    // Must not affect admin email behavior or API response
+    // Capture request data for background processing (uploads + emails)
+    const requestId = savedRequest._id.toString();
+    const requestBody = req.body;
+    const requestFiles = Array.isArray(req.files) ? req.files : [];
+
+
+    // Background processing must never block the client response
     setImmediate(async () => {
       try {
-        const result = await sendApplicationReceivedToClient({
-          to: resolvedContactEmail,
-          requestId: savedRequest._id.toString(),
-        });
+        // Handle file uploads if files were provided
+        const uploaded = [];
 
-        if (result && result.success) {
-          logger.info('Confirmation email sent to client for application', {
-            requestId: savedRequest._id,
-            to: resolvedContactEmail
-          });
-        } else {
-          logger.warn('Failed to send confirmation email to client for application', {
-            requestId: savedRequest._id,
+        if (requestFiles.length > 0) {
+          for (const file of requestFiles) {
+            try {
+              const result = await uploadFile(
+                file.buffer,
+                file.originalname,
+                file.mimetype,
+                requestId
+              );
+              uploaded.push({
+                name: file.originalname,
+                storageKey: result.storageKey,
+                bucket: result.bucket,
+                mimeType: result.mimeType,
+                size: result.size,
+                isPublic: result.isPublic
+              });
+              logger.info('File uploaded for application', {
+                requestId,
+                fileName: file.originalname,
+                size: file.size
+              });
+            } catch (fileErr) {
+              logger.warn('Failed to upload application file', {
+                requestId,
+                fileName: file.originalname,
+                error: fileErr && fileErr.message
+              });
+            }
+          }
+
+          if (uploaded.length > 0) {
+            try {
+              savedRequest.files = uploaded;
+              await savedRequest.save();
+              logger.info('Files metadata saved to application', {
+                requestId,
+                fileCount: uploaded.length
+              });
+            } catch (saveErr) {
+              logger.warn('Failed to save uploaded file metadata to request', {
+                requestId,
+                error: saveErr && saveErr.message
+              });
+            }
+          }
+        }
+
+        // Prepare complete data for email notification
+        // Include ALL form data (not just subset) + uploaded files
+        const applicationData = {
+          // Request ID (needed for file URL generation)
+          requestId,
+
+          // Contact Information
+          name: requestBody.contactPersonName,
+          email: resolvedContactEmail,
+          phone: resolvedContactPhone,
+
+          // Company Information
+          companyName: requestBody.companyName,
+          companyAddress: resolvedCompanyAddress,
+          addressLine1: requestBody.addressLine1,
+          addressLine2: requestBody.addressLine2,
+          city: requestBody.city,
+          state: requestBody.state,
+          postalCode: requestBody.postalCode,
+          country: requestBody.country,
+          website: requestBody.website,
+          telephone: requestBody.telephone,
+          fax: requestBody.fax,
+          industry: requestBody.industry,
+          companySize: requestBody.companySize,
+          numberOfEmployees: requestBody.numberOfEmployees?.toString(),
+          numberOfLocations: requestBody.numberOfLocations?.toString(),
+
+          // Contact Person Details
+          contactPersonName: requestBody.contactPersonName,
+          contactPersonPosition: requestBody.contactPersonPosition,
+          contactPersonMobile: requestBody.contactPersonMobile || requestBody.contactPersonPhone,
+          contactPersonEmail: requestBody.contactPersonEmail,
+          contactEmail: resolvedContactEmail,
+          contactPhone: resolvedContactPhone,
+
+          // Executive Manager Details
+          executiveManagerName: requestBody.executiveManagerName,
+          executiveManagerMobile: requestBody.executiveManagerMobile,
+          executiveManagerEmail: requestBody.executiveManagerEmail,
+
+          // Workforce Details
+          workforceTotalEmployees: requestBody.workforceTotalEmployees,
+          workforceEmployeesPerShift: requestBody.workforceEmployeesPerShift,
+          workforceNumberOfShifts: requestBody.workforceNumberOfShifts,
+          workforceSeasonalEmployees: requestBody.workforceSeasonalEmployees,
+
+          // ISO 9001 Details
+          iso9001DesignAndDevelopment: requestBody.iso9001DesignAndDevelopment,
+          iso9001OtherNonApplicableClauses: requestBody.iso9001OtherNonApplicableClauses,
+          iso9001OtherNonApplicableClausesText: requestBody.iso9001OtherNonApplicableClausesText,
+
+          // ISO 14001 Details
+          iso14001SitesManaged: requestBody.iso14001SitesManaged,
+          iso14001RegisterOfSignificantAspects: requestBody.iso14001RegisterOfSignificantAspects,
+          iso14001EnvironmentalManagementManual: requestBody.iso14001EnvironmentalManagementManual,
+          iso14001InternalAuditProgramme: requestBody.iso14001InternalAuditProgramme,
+          iso14001InternalAuditImplemented: requestBody.iso14001InternalAuditImplemented,
+
+          // ISO 22000 Details
+          iso22000HaccpImplementation: requestBody.iso22000HaccpImplementation,
+          iso22000HaccpStudies: requestBody.iso22000HaccpStudies,
+          iso22000Sites: requestBody.iso22000Sites,
+          iso22000ProcessLines: requestBody.iso22000ProcessLines,
+          iso22000ProcessingType: requestBody.iso22000ProcessingType,
+
+          // ISO 45001 Details
+          iso45001HazardsIdentified: requestBody.iso45001HazardsIdentified,
+          iso45001CriticalRisks: requestBody.iso45001CriticalRisks,
+
+          // Certification Details
+          certificationsRequested: JSON.stringify(parsedStandards),
+          certificationProgramme: requestBody.certificationProgramme,
+          currentCertifications: requestBody.currentCertifications,
+          preferredAuditDate: requestBody.preferredAuditDate,
+          transferReason: requestBody.transferReason,
+          transferExpiringDate: requestBody.transferExpiringDate,
+
+          // Additional Information
+          additionalInfo: requestBody.additionalInfo,
+
+          // Uploaded Files (IMPORTANT: Include file metadata)
+          uploadedFiles: uploaded.map(file => ({
+            name: file.name,
+            storageKey: file.storageKey,
+            bucket: file.bucket,
+            mimeType: file.mimeType,
+            size: file.size,
+            publicUrl: ''
+          })) || []
+        };
+
+        // 🔄 Send confirmation email to client in background (non-blocking)
+        // Must not affect admin email behavior or API response
+        try {
+          const result = await sendApplicationReceivedToClient({
             to: resolvedContactEmail,
-            error: result && result.error
+            requestId,
           });
+
+          if (result && result.success) {
+            logger.info('Confirmation email sent to client for application', {
+              requestId,
+              to: resolvedContactEmail
+            });
+          } else {
+            logger.warn('Failed to send confirmation email to client for application', {
+              requestId,
+              to: resolvedContactEmail,
+              error: result && result.error
+            });
+          }
+        } catch (err) {
+          logger.error('Failed to send confirmation email to client for application:', err);
         }
-      } catch (err) {
-        logger.error('Failed to send confirmation email to client for application:', err);
-      }
-    });
 
-    // 🔄 Send email notification in background (non-blocking)
-    // Uses setImmediate to ensure this runs after response is sent
-    setImmediate(async () => {
-      try {
-        const expirySeconds = Math.max(
-          60,
-          parseInt(process.env.EMAIL_FILE_URL_EXPIRES_IN || '86400', 10) || 86400
-        );
-
-        if (Array.isArray(applicationData.uploadedFiles) && applicationData.uploadedFiles.length > 0) {
-          applicationData.uploadedFiles = await Promise.all(
-            applicationData.uploadedFiles.map(async (file) => {
-              const bucket = file.bucket || process.env.STORAGE_BUCKET || 'certificates';
-              const fallbackUrl = `${process.env.API_URL || 'http://localhost:5001'}/api/v1/applications/${savedRequest._id}/file/${encodeURIComponent(file.storageKey)}`;
-
-              try {
-                const signedUrl = await getSignedFileUrl(bucket, file.storageKey, expirySeconds);
-                return { ...file, publicUrl: signedUrl };
-              } catch (signErr) {
-                logger.warn('Failed to generate signed URL for application file', {
-                  requestId: savedRequest._id,
-                  bucket,
-                  storageKey: file.storageKey,
-                  error: signErr && signErr.message
-                });
-                return { ...file, publicUrl: fallbackUrl };
-              }
-            })
+        // 🔄 Send email notification in background (non-blocking)
+        // Uses setImmediate to ensure this runs after response is sent
+        try {
+          const expirySeconds = Math.max(
+            60,
+            parseInt(process.env.EMAIL_FILE_URL_EXPIRES_IN || '86400', 10) || 86400
           );
-        }
 
-        const emailResult = await sendApplicationEmail(applicationData);
-        if (emailResult && emailResult.success) {
-          logger.info('Notification email sent for application', { requestId: savedRequest._id });
-        } else {
-          logger.warn('Failed to send notification email', { requestId: savedRequest._id, error: emailResult?.error });
+          if (Array.isArray(applicationData.uploadedFiles) && applicationData.uploadedFiles.length > 0) {
+            applicationData.uploadedFiles = await Promise.all(
+              applicationData.uploadedFiles.map(async (file) => {
+                const bucket = file.bucket || process.env.STORAGE_BUCKET || 'certificates';
+                const fallbackUrl = `${process.env.API_URL || 'http://localhost:5001'}/api/v1/applications/${requestId}/file/${encodeURIComponent(file.storageKey)}`;
+
+                try {
+                  const signedUrl = await getSignedFileUrl(bucket, file.storageKey, expirySeconds);
+                  return { ...file, publicUrl: signedUrl };
+                } catch (signErr) {
+                  logger.warn('Failed to generate signed URL for application file', {
+                    requestId,
+                    bucket,
+                    storageKey: file.storageKey,
+                    error: signErr && signErr.message
+                  });
+                  return { ...file, publicUrl: fallbackUrl };
+                }
+              })
+            );
+          }
+
+          const emailResult = await sendApplicationEmail(applicationData);
+          if (emailResult && emailResult.success) {
+            logger.info('Notification email sent for application', { requestId });
+          } else {
+            logger.warn('Failed to send notification email', { requestId, error: emailResult?.error });
+          }
+        } catch (emailError) {
+          logger.error('Error sending application email:', emailError);
+          // Email failure is logged but doesn't affect user's application submission
         }
-      } catch (emailError) {
-        logger.error('Error sending application email:', emailError);
-        // Email failure is logged but doesn't affect user's application submission
+      } catch (bgErr) {
+        logger.error('Error processing application in background:', bgErr);
       }
     });
+
+    return;
   } catch (error) {
     logger.error('Error processing application:', error);
     const response = {

@@ -51,7 +51,7 @@ app.use(compression());
 app.use(mongoSanitize());
 
 // Middleware - CORS, JSON parsers
-app.use(cors({
+const corsOptions = {
     origin: function (origin, callback) {
         // Allow requests from custom domain, Vercel frontend, Railway backend, and localhost
         const allowedOrigins = [
@@ -61,6 +61,12 @@ app.use(cors({
             'http://localhost:3000',
             'http://127.0.0.1:3000',
         ];
+
+        // Allow env-configured frontend URL if present
+        const frontendUrl = (process.env.FRONTEND_URL || '').trim();
+        if (frontendUrl && !allowedOrigins.includes(frontendUrl)) {
+            allowedOrigins.push(frontendUrl);
+        }
 
         // Check if origin is in allowed list
         if (!origin) {
@@ -78,7 +84,12 @@ app.use(cors({
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     maxAge: 86400 // 24 hours
-}));
+};
+
+// Handle preflight early, before any auth/csrf middleware
+app.options('*', cors(corsOptions));
+
+app.use(cors(corsOptions));
 
 // Increase request size limits to handle large payloads (Base64 encoded files, etc.)
 app.use(express.json({ limit: '20mb' }));
