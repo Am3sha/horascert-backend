@@ -17,13 +17,6 @@ const csrfCheck = (req, res, next) => {
         return next();
     }
 
-    // If the request is authenticated via Authorization: Bearer <token>, it is not CSRF-susceptible.
-    // CSRF primarily applies to cookie-based authentication where the browser attaches credentials automatically.
-    const authHeader = String(req.headers.authorization || '').trim();
-    if (authHeader.toLowerCase().startsWith('bearer ')) {
-        return next();
-    }
-
     const frontendUrl = (process.env.FRONTEND_URL || '').trim();
 
     if (!frontendUrl) {

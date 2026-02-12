@@ -77,7 +77,7 @@ router.post(
                     res.cookie('token', token, {
                         httpOnly: true,
                         secure: process.env.NODE_ENV === 'production',
-                        sameSite: 'none', // Allow cross-site cookie sending
+                        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // lax for dev, none for prod
                         maxAge: 4 * 60 * 60 * 1000, // 4 hours
                         path: '/', // Available on all paths
                         domain: undefined // Browser automatically handles domain
@@ -85,7 +85,6 @@ router.post(
 
                     res.json({
                         success: true,
-                        token,
                         admin: { email: user.email, role: user.role }
                     });
                 }
@@ -104,9 +103,9 @@ router.post(
 router.post('/logout', auth, (req, res) => {
     res.clearCookie('token', {
         httpOnly: true,
-        secure: true, // Must match login cookie settings
-        sameSite: 'none', // Must match login cookie settings
-        path: '/' // Must match login cookie settings
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Must match login cookie
+        path: '/'
     });
     res.status(200).json({
         success: true,
