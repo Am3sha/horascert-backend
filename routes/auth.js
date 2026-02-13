@@ -8,6 +8,16 @@ const logger = require('../utils/logger');
 
 const router = express.Router();
 
+const isProd = process.env.NODE_ENV === 'production';
+
+const cookieOptions = {
+    httpOnly: true,
+    secure: isProd,                    // HTTPS only in production
+    sameSite: isProd ? 'none' : 'lax', // CRITICAL FIX
+    path: '/',
+    maxAge: 7 * 24 * 60 * 60 * 1000    // 7 days
+};
+
 // @route   POST api/auth/login
 // @desc    Authenticate admin & get token
 // @access  Public
@@ -67,21 +77,14 @@ router.post(
             jwt.sign(
                 payload,
                 process.env.JWT_SECRET,
-                { expiresIn: process.env.JWT_EXPIRE || '4h' },
+                { expiresIn: '7d' }, // Increased to match cookie maxAge
                 (err, token) => {
                     if (err) {
                         throw err;
                     }
 
                     // Set cookie with proper configuration for cross-domain (Vercel ↔ Railway)
-                    res.cookie('token', token, {
-                        httpOnly: true,
-                        secure: process.env.NODE_ENV === 'production',
-                        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // lax for dev, none for prod
-                        maxAge: 4 * 60 * 60 * 1000, // 4 hours
-                        path: '/', // Available on all paths
-                        domain: undefined // Browser automatically handles domain
-                    });
+                    res.cookie('token', token, cookieOptions);
 
                     res.json({
                         success: true,
@@ -101,12 +104,7 @@ router.post(
 );
 
 router.post('/logout', auth, (req, res) => {
-    res.clearCookie('token', {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Must match login cookie
-        path: '/'
-    });
+    res.clearCookie('token', cookieOptions);
     res.status(200).json({
         success: true,
         message: 'Logged out successfully'
@@ -118,10 +116,8 @@ router.post('/logout', auth, (req, res) => {
 // @access  Private
 router.get('/verify', (req, res) => {
     try {
-        // Get token from header or cookie
-        const headerToken = req.header('Authorization')?.replace('Bearer ', '')?.trim();
-        const cookieToken = (req.cookies?.token || '').trim();
-        const token = (headerToken || cookieToken || '').trim();
+        // Get token EXCLUSIVELY from cookie (no Authorization header as per requirements)
+        const token = (req.cookies?.token || '').trim();
 
         if (!token) {
             return res.status(401).json({ success: false, error: 'AuthError', message: 'No token, authorization denied' });
