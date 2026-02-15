@@ -8,15 +8,18 @@ const allowedOrigins = [
 ];
 
 module.exports = function csrfCheck(req, res, next) {
+    // Bypass CSRF entirely in development
     if (process.env.NODE_ENV !== 'production') {
-        return next(); // Allow everything in development
+        return next();
     }
 
+    // Safe methods should never be blocked by CSRF
     const method = String(req.method || 'GET').toUpperCase();
     if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
         return next();
     }
 
+    // Only apply CSRF checks to unsafe methods (POST, PUT, DELETE, PATCH)
     const origin = req.headers.origin;
     const referer = req.headers.referer;
 
@@ -26,12 +29,18 @@ module.exports = function csrfCheck(req, res, next) {
     }
 
     // 2️⃣ Fallback to Referer
-    if (
-        referer &&
-        allowedOrigins.some((allowed) => referer.startsWith(allowed))
-    ) {
+    if (referer && allowedOrigins.some((allowed) => referer.startsWith(allowed))) {
         return next();
     }
+
+    // Log the failure for debugging (remove in production if needed)
+    console.error('CSRF Check Failed:', {
+        method,
+        origin,
+        referer,
+        allowedOrigins,
+        ip: req.ip
+    });
 
     return res.status(403).json({
         success: false,

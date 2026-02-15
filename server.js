@@ -69,6 +69,12 @@ const corsOptions = {
             return callback(null, true);
         }
 
+        // Log CORS rejection for debugging
+        console.error('CORS Rejected:', {
+            origin,
+            allowedOrigins
+        });
+
         return callback(new ApiError(403, 'Not allowed by CORS'));
     },
     credentials: true,
