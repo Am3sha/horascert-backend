@@ -54,7 +54,7 @@ app.use(mongoSanitize());
 const allowedOrigins = [
     'https://horascert.com',
     'https://www.horascert.com',
-    'https://horsecert.vercel.app',
+    'https://horascert.vercel.app',
     'http://localhost:3000'
 ];
 
