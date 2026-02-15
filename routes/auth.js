@@ -76,11 +76,11 @@ router.post(
                     // Set cookie with proper configuration for cross-domain (Vercel ↔ Railway)
                     res.cookie('token', token, {
                         httpOnly: true,
-                        secure: process.env.NODE_ENV === 'production',
-                        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // lax for dev, none for prod
-                        maxAge: 4 * 60 * 60 * 1000, // 4 hours
-                        path: '/', // Available on all paths
-                        domain: undefined // Browser automatically handles domain
+                        secure: true, // Always true for cross-domain HTTPS
+                        sameSite: 'none', // Required for cross-domain
+                        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+                        path: '/',
+                        domain: undefined // Let browser handle domain automatically
                     });
 
                     res.json({
@@ -103,8 +103,8 @@ router.post(
 router.post('/logout', auth, (req, res) => {
     res.clearCookie('token', {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Must match login cookie
+        secure: true, // Must match login cookie
+        sameSite: 'none', // Must match login cookie
         path: '/'
     });
     res.status(200).json({
