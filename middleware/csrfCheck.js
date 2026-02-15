@@ -3,7 +3,7 @@ const { ApiError } = require('./errorHandler');
 const allowedOrigins = [
     'https://horascert.com',
     'https://www.horascert.com',
-    'https://horascert-frontend.vercel.app',
+    'https://horsecert.vercel.app',
     'http://localhost:3000'
 ];
 
