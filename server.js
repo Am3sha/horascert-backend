@@ -51,36 +51,27 @@ app.use(compression());
 app.use(mongoSanitize());
 
 // Middleware - CORS, JSON parsers
+const allowedOrigins = [
+    'https://horascert.com',
+    'https://www.horascert.com',
+    'https://horascert-frontend.vercel.app',
+    'http://localhost:3000'
+];
+
 const corsOptions = {
     origin: function (origin, callback) {
-        // Allow requests from custom domain, Vercel frontend, Railway backend, and localhost
-        const allowedOrigins = [
-            'https://horascert.com',
-            'https://www.horascert.com',
-            'https://horascert-frontend.vercel.app',
-            'http://localhost:3000',
-            'http://127.0.0.1:3000',
-        ];
+        if (!origin) return callback(null, true);
 
-        // Allow env-configured frontend URL if present
-        const frontendUrl = (process.env.FRONTEND_URL || '').trim();
-        if (frontendUrl && !allowedOrigins.includes(frontendUrl)) {
-            allowedOrigins.push(frontendUrl);
-        }
-
-        // Check if origin is in allowed list
-        if (!origin) {
-            // Allow requests with no origin (Postman, server-to-server, etc.)
-            return callback(null, true);
-        }
-
-        if (allowedOrigins.includes(origin)) {
+        if (
+            allowedOrigins.includes(origin) ||
+            origin.startsWith('http://localhost:')
+        ) {
             return callback(null, true);
         }
 
         return callback(new ApiError(403, 'Not allowed by CORS'));
     },
-    credentials: true, // Allow credentials (cookies, auth headers)
+    credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     maxAge: 86400 // 24 hours
