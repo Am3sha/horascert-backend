@@ -15,6 +15,7 @@ const applicationsRouter = require('./routes/applications');
 const adminRouter = require('./routes/admin');
 const certificatesRouter = require('./routes/certificates');
 const emailsRouter = require('./routes/emails');
+const trainingCertificatesRouter = require('./routes/trainingCertificates');
 
 const csrfCheck = require('./middleware/csrfCheck');
 
@@ -69,8 +70,8 @@ const corsOptions = {
             return callback(null, true);
         }
 
-        // Log CORS rejection for debugging
-        console.error('CORS Rejected:', {
+        // Log CORS rejection for security monitoring
+        logger.warn('CORS Rejected:', {
             origin,
             allowedOrigins
         });
@@ -128,7 +129,8 @@ app.use('/api/v1/auth', authRouter);
 app.use('/api/v1/applications', csrfCheck, applicationsRouter);
 app.use('/api/v1/admin', csrfCheck, adminRouter);
 app.use('/api/v1/certificates', csrfCheck, certificatesRouter);
-app.use('/api/v1/emails', emailsRouter);
+app.use('/api/v1/emails', csrfCheck, emailsRouter);
+app.use('/api/v1/training-certificates', csrfCheck, trainingCertificatesRouter);
 
 // Legacy support: /api/applications without v1 prefix
 app.use('/api/applications', applicationsRouter);

@@ -1,4 +1,5 @@
 const { ApiError } = require('./errorHandler');
+const logger = require('../utils/logger');
 
 const allowedOrigins = [
     'https://horascert.com',
@@ -33,8 +34,8 @@ module.exports = function csrfCheck(req, res, next) {
         return next();
     }
 
-    // Log the failure for debugging (remove in production if needed)
-    console.error('CSRF Check Failed:', {
+    // Log CSRF failures for security monitoring
+    logger.warn('CSRF Check Failed:', {
         method,
         origin,
         referer,
