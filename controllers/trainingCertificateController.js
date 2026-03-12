@@ -308,6 +308,10 @@ exports.verifyTrainingCertificate = async (req, res, next) => {
 
         const isExpired = new Date() > certificate.expiryDate;
 
+        // Generate QR code for display
+        const qrCodeUrl = `${process.env.FRONTEND_URL}/verify/training/${certificate.certificateNumber}`;
+        const qrCodeImage = await QRCode.toDataURL(qrCodeUrl);
+
         res.json({
             success: true,
             verified: true,
@@ -322,6 +326,7 @@ exports.verifyTrainingCertificate = async (req, res, next) => {
                 expiryDate: certificate.expiryDate,
                 status: certificate.status,
                 isExpired,
+                qrCodeImage, // Add QR code image to response
             },
         });
     } catch (error) {
