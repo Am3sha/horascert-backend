@@ -126,6 +126,7 @@ exports.createTrainingCertificate = async (req, res, next) => {
             issueDate: new Date(issueDate || Date.now()),
             expiryDate: new Date(expiryDate || getDefaultExpiry()),
             qrCode: qrCodeUrl,
+            qrCodeImage: qrCodeImage, // Store QR image in database
             status: 'active',
             createdBy: req.user ? req.user._id : undefined,
             notes,
@@ -308,10 +309,6 @@ exports.verifyTrainingCertificate = async (req, res, next) => {
 
         const isExpired = new Date() > certificate.expiryDate;
 
-        // Generate QR code for display
-        const qrCodeUrl = `${process.env.FRONTEND_URL}/verify/training/${certificate.certificateNumber}`;
-        const qrCodeImage = await QRCode.toDataURL(qrCodeUrl);
-
         res.json({
             success: true,
             verified: true,
@@ -326,7 +323,7 @@ exports.verifyTrainingCertificate = async (req, res, next) => {
                 expiryDate: certificate.expiryDate,
                 status: certificate.status,
                 isExpired,
-                qrCodeImage, // Add QR code image to response
+                qrCodeImage: certificate.qrCodeImage, // Return stored QR image
             },
         });
     } catch (error) {

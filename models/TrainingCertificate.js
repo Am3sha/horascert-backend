@@ -60,10 +60,16 @@ const trainingCertificateSchema = new mongoose.Schema({
     required: true,
   },
 
-  // QR Code (same as ISO)
+  // QR Code URL (for verification link)
   qrCode: {
     type: String,
     unique: true,
+  },
+
+  // QR Code Image (base64 data URL)
+  qrCodeImage: {
+    type: String,
+    required: true,
   },
 
   // Status (same as ISO)
