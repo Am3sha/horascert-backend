@@ -313,11 +313,15 @@ exports.verifyTrainingCertificate = async (req, res, next) => {
             verified: true,
             data: {
                 certificateNumber: certificate.certificateNumber,
-                traineeName: certificate.trainee.name,
-                organization: certificate.trainee.organization,
-                courseName: certificate.training.courseName,
-                trainingDate: certificate.training.date,
-                hours: certificate.training.hours,
+                qrCode: certificate.qrCode,
+                traineeName: certificate.trainee?.name || 'N/A',
+                organization: certificate.trainee?.organization || 'N/A',
+                address: certificate.trainee?.address || 'N/A',
+                courseName: certificate.training?.courseName || 'N/A',
+                category: certificate.training?.category || 'N/A',
+                trainingDate: certificate.training?.date || certificate.createdAt,
+                hours: certificate.training?.hours || 0,
+                trainer: certificate.training?.trainer || 'N/A',
                 issueDate: certificate.issueDate,
                 expiryDate: certificate.expiryDate,
                 status: certificate.status,
@@ -325,6 +329,7 @@ exports.verifyTrainingCertificate = async (req, res, next) => {
             },
         });
     } catch (error) {
+        console.error('Verify training certificate error:', error);
         next(error);
     }
 };
