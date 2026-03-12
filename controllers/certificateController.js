@@ -250,15 +250,20 @@ const getCertificates = async (req, res, next) => {
 const getCertificateQrPng = async (req, res, next) => {
     try {
         const lookup = (req.params.id || '').trim();
-        let certificate = await Certificate.findOne({ certificateId: lookup }).select('certificateId certificateNumber');
 
-        if (!certificate) {
-            certificate = await Certificate.findOne({ certificateNumber: lookup }).select('certificateId certificateNumber');
+        // Use single query with $or operator for better performance
+        const queryConditions = [
+            { certificateId: lookup },
+            { certificateNumber: lookup }
+        ];
+
+        if (mongoose.Types.ObjectId.isValid(lookup)) {
+            queryConditions.push({ _id: lookup });
         }
 
-        if (!certificate && mongoose.Types.ObjectId.isValid(lookup)) {
-            certificate = await Certificate.findById(lookup).select('certificateId certificateNumber');
-        }
+        const certificate = await Certificate.findOne({
+            $or: queryConditions
+        }).select('certificateId certificateNumber');
 
         if (!certificate) {
             return next(new ApiError(404, 'Certificate not found'));
@@ -267,10 +272,6 @@ const getCertificateQrPng = async (req, res, next) => {
         // NOTE: QR Code generation moved to Frontend
         // Backend no longer generates QRs because it doesn't know the frontend domain
         // Frontend generates QRs using the current domain (window.location.origin)
-
-        if (!certificate) {
-            return next(new ApiError(404, 'Certificate not found'));
-        }
 
         // Return 404 - QR generation now happens in Frontend only
         return next(new ApiError(410, 'QR endpoint deprecated - QR codes are generated in Frontend'));
