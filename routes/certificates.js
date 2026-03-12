@@ -10,7 +10,8 @@ const {
     deleteCertificate,
     verifyCertificate,
     deleteCertificateByCertificateId,
-    updateCertificateByCertificateId
+    updateCertificateByCertificateId,
+    getCertificateStats
 } = require('../controllers/certificateController');
 const { auth, restrictTo } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
@@ -24,12 +25,13 @@ const verificationLimiter = rateLimit({
     message: 'Too many verification requests, please try again later.'
 });
 
-// Public routes
+// Public routes - SPECIFIC ROUTES FIRST
 router.get(
     '/',
     asyncHandler(getCertificates)
 );
 
+// ✅ VERIFY ENDPOINT - MUST BE BEFORE CATCH-ALL
 router.get(
     '/verify/:certificateNumber',
     verificationLimiter,
@@ -55,11 +57,6 @@ router.get(
 router.get(
     '/:id/qr',
     asyncHandler(getCertificateQrPng)
-);
-
-router.get(
-    '/:certificateNumber',
-    asyncHandler(getCertificate)
 );
 
 // Protected routes (Admin only)
@@ -96,6 +93,20 @@ router.delete(
     auth,
     restrictTo('admin'),
     asyncHandler(deleteCertificate)
+);
+
+// Stats route (protected) - MUST be before catch-all
+router.get(
+    '/stats',
+    auth,
+    restrictTo('admin'),
+    asyncHandler(getCertificateStats)
+);
+
+// ✅ CATCH-ALL ROUTE - MUST BE LAST
+router.get(
+    '/:certificateNumber',
+    asyncHandler(getCertificate)
 );
 
 module.exports = router;

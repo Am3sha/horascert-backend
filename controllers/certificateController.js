@@ -133,8 +133,24 @@ const getCertificates = async (req, res, next) => {
         ];
 
         const filters = {};
+        const now = new Date();
+
+        // Handle status filter with expiry auto-detection
+        if (req.query.status) {
+            const statusValue = coerceQueryValue(req.query.status).toLowerCase();
+            if (statusValue === 'expired') {
+                filters.expiryDate = { $lt: now };
+            } else if (statusValue === 'active') {
+                filters.status = { $ne: 'revoked' };
+                filters.expiryDate = { $gte: now };
+            } else {
+                filters.status = statusValue;
+            }
+        }
+
+        // Apply other allowed filters
         Object.keys(req.query || {}).forEach((key) => {
-            if (allowedFilterFields.includes(key)) {
+            if (allowedFilterFields.includes(key) && key !== 'status') {
                 filters[key] = coerceQueryValue(req.query[key]);
             }
         });
@@ -200,7 +216,13 @@ const getCertificates = async (req, res, next) => {
         // Use lean() for read-only queries to improve performance
         query = query.skip(skip).limit(limit).lean();
 
-        const certificates = (await query).map((c) => normalizeCertificateStatus(c));
+        const certificates = (await query).map((c) => {
+            const normalized = normalizeCertificateStatus(c);
+            // Auto-detect expired
+            normalized.isExpired = normalized.expiryDate < now;
+            normalized.displayStatus = normalized.isExpired ? 'expired' : normalized.status;
+            return normalized;
+        });
 
         const pagination = {};
         if (endIndex < total) {
@@ -583,6 +605,64 @@ const updateCertificateByCertificateId = async (req, res) => {
     }
 };
 
+/**
+ * @desc    Get certificate statistics for dashboard
+ * @route   GET /api/certificates/stats
+ * @access  Private/Admin
+ */
+const getCertificateStats = async (req, res, next) => {
+    try {
+        const now = new Date();
+
+        // Total certificates
+        const total = await Certificate.countDocuments();
+
+        // Active (not revoked AND not expired)
+        const active = await Certificate.countDocuments({
+            status: { $ne: 'revoked' },
+            expiryDate: { $gte: now }
+        });
+
+        // Expired (expiryDate passed)
+        const expired = await Certificate.countDocuments({
+            expiryDate: { $lt: now }
+        });
+
+        // Revoked
+        const revoked = await Certificate.countDocuments({
+            status: 'revoked'
+        });
+
+        // This month (created in current month)
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const thisMonth = await Certificate.countDocuments({
+            createdAt: { $gte: startOfMonth }
+        });
+
+        // Expiring soon (within 30 days)
+        const in30Days = new Date(now.getTime() + (30 * 24 * 60 * 60 * 1000));
+        const expiringSoon = await Certificate.countDocuments({
+            expiryDate: { $gte: now, $lte: in30Days },
+            status: { $ne: 'revoked' }
+        });
+
+        res.json({
+            success: true,
+            stats: {
+                total,
+                active,
+                expired,
+                revoked,
+                thisMonth,
+                expiringSoon
+            }
+        });
+    } catch (error) {
+        logger.error('Error fetching certificate stats:', error);
+        next(error);
+    }
+};
+
 module.exports = {
     createCertificate,
     getCertificates,
@@ -592,5 +672,6 @@ module.exports = {
     verifyCertificate,
     deleteCertificateByCertificateId,
     updateCertificateByCertificateId,
-    getCertificateQrPng
+    getCertificateQrPng,
+    getCertificateStats
 };

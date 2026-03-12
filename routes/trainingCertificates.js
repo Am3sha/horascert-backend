@@ -7,6 +7,7 @@ const {
     updateTrainingCertificate,
     deleteTrainingCertificate,
     verifyTrainingCertificate,
+    getTrainingCertificateStats
 } = require('../controllers/trainingCertificateController');
 const { auth, restrictTo } = require('../middleware/auth');
 
@@ -20,6 +21,9 @@ router.use(restrictTo('admin'));
 router.route('/')
     .get(getAllTrainingCertificates)
     .post(createTrainingCertificate);
+
+router.route('/stats')
+    .get(getTrainingCertificateStats);
 
 router.route('/:id')
     .get(getTrainingCertificateById)

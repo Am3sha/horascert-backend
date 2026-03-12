@@ -72,28 +72,49 @@ exports.createTrainingCertificate = async (req, res, next) => {
             training,
             issueDate,
             expiryDate,
+            notes,
         } = req.body;
 
-        // Validate input (includes certificate number validation)
-        validateTrainingCertificateInput({ certificateNumber, trainee, training, issueDate, expiryDate });
+        let certNumber = certificateNumber;
+
+        if (!certNumber || certNumber.trim() === '') {
+            // Auto-generate if not provided
+            const lastCert = await TrainingCertificate
+                .findOne()
+                .sort({ createdAt: -1 });
+
+            let num = 1;
+            if (lastCert && lastCert.certificateNumber && lastCert.certificateNumber.includes('-')) {
+                const lastNum = parseInt(lastCert.certificateNumber.split('-')[1]);
+                if (!isNaN(lastNum)) {
+                    num = lastNum + 1;
+                }
+            }
+
+            certNumber = `TRAIN-${num.toString().padStart(3, '0')}`;
+        }
+
+        // Validate input (includes generated certificate number)
+        validateTrainingCertificateInput({ certificateNumber: certNumber, trainee, training, issueDate, expiryDate });
 
         // Check if certificate number already exists
-        const existingCert = await TrainingCertificate.findOne({ certificateNumber });
+        const existingCert = await TrainingCertificate.findOne({ certificateNumber: certNumber });
         if (existingCert) {
-            throw new ApiError(400, `Certificate number "${certificateNumber}" already exists`);
+            throw new ApiError(400, `Certificate number "${certNumber}" already exists`);
         }
 
         // Generate QR code pointing to certificate verification URL
-        const qrCodeUrl = `${process.env.FRONTEND_URL}/verify/training/${certificateNumber}`;
+        const qrCodeUrl = `${process.env.FRONTEND_URL}/verify/training/${certNumber}`;
         const qrCodeImage = await QRCode.toDataURL(qrCodeUrl);
 
         // Create certificate in database
         const certificate = await TrainingCertificate.create({
-            certificateNumber,
+            certificateNumber: certNumber,
             trainee: {
                 name: trainee.name,
                 organization: trainee.organization,
                 address: trainee.address,
+                email: trainee.email || '',
             },
             training: {
                 courseName: training.courseName,
@@ -102,11 +123,12 @@ exports.createTrainingCertificate = async (req, res, next) => {
                 hours: parseInt(training.hours) || 0,
                 trainer: training.trainer || '',
             },
-            issueDate: new Date(issueDate),
-            expiryDate: new Date(expiryDate),
+            issueDate: new Date(issueDate || Date.now()),
+            expiryDate: new Date(expiryDate || getDefaultExpiry()),
             qrCode: qrCodeUrl,
             status: 'active',
             createdBy: req.user ? req.user._id : undefined,
+            notes,
         });
 
         res.status(201).json({
@@ -133,6 +155,7 @@ exports.getAllTrainingCertificates = async (req, res, next) => {
         } = req.query;
 
         const query = {};
+        const now = new Date();
 
         if (search) {
             query.$or = [
@@ -141,7 +164,19 @@ exports.getAllTrainingCertificates = async (req, res, next) => {
             ];
         }
 
-        if (status) query.status = status;
+        // Handle status filter with expiry auto-detection
+        if (status) {
+            const statusLower = String(status).toLowerCase();
+            if (statusLower === 'expired') {
+                query.expiryDate = { $lt: now };
+            } else if (statusLower === 'active') {
+                query.status = { $ne: 'revoked' };
+                query.expiryDate = { $gte: now };
+            } else {
+                query.status = status;
+            }
+        }
+
         if (category) query['training.category'] = category;
 
         const skip = (page - 1) * limit;
@@ -153,13 +188,21 @@ exports.getAllTrainingCertificates = async (req, res, next) => {
             .skip(skip)
             .limit(parseInt(limit));
 
+        // Auto-detect expired status
+        const enrichedCerts = certificates.map(cert => {
+            const certObj = cert.toObject();
+            certObj.isExpired = cert.expiryDate < now;
+            certObj.displayStatus = certObj.isExpired ? 'expired' : cert.status;
+            return certObj;
+        });
+
         res.json({
             success: true,
-            count: certificates.length,
+            count: enrichedCerts.length,
             total,
             page: parseInt(page),
             pages: Math.ceil(total / limit),
-            data: certificates,
+            data: enrichedCerts,
         });
     } catch (error) {
         next(error);
@@ -286,4 +329,52 @@ exports.verifyTrainingCertificate = async (req, res, next) => {
     }
 };
 
+// @desc    Get training certificate statistics for dashboard
+// @route   GET /api/v1/training-certificates/stats
+// @access  Private/Admin
+exports.getTrainingCertificateStats = async (req, res, next) => {
+    try {
+        const now = new Date();
 
+        const total = await TrainingCertificate.countDocuments();
+
+        const active = await TrainingCertificate.countDocuments({
+            status: { $ne: 'revoked' },
+            expiryDate: { $gte: now }
+        });
+
+        const expired = await TrainingCertificate.countDocuments({
+            expiryDate: { $lt: now }
+        });
+
+        const revoked = await TrainingCertificate.countDocuments({
+            status: 'revoked'
+        });
+
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const thisMonth = await TrainingCertificate.countDocuments({
+            createdAt: { $gte: startOfMonth }
+        });
+
+        const in30Days = new Date(now.getTime() + (30 * 24 * 60 * 60 * 1000));
+        const expiringSoon = await TrainingCertificate.countDocuments({
+            expiryDate: { $gte: now, $lte: in30Days },
+            status: { $ne: 'revoked' }
+        });
+
+        res.json({
+            success: true,
+            stats: {
+                total,
+                active,
+                expired,
+                revoked,
+                thisMonth,
+                expiringSoon
+            }
+        });
+    } catch (error) {
+        logger.error('Error fetching training certificate stats:', error);
+        next(error);
+    }
+};
