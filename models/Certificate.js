@@ -25,6 +25,12 @@ const certificateSchema = new mongoose.Schema({
         trim: true
     },
 
+    companyEmail: {
+        type: String,
+        trim: true,
+        lowercase: true
+    },
+
     companyAddress: {
         street: String,
         city: String,

@@ -166,7 +166,7 @@ const sendApplicationEmail = async (applicationData) => {
     // Build email HTML with only non-empty fields
     // Uses helper functions to avoid N/A and undefined values
     // ========================================================================
-    let emailHTML = '<h2>New Certification Application</h2>';
+    let emailHTML = '<h2>New horascert.com Application</h2>';
 
     const isYes = (value) => String(value || '').trim().toLowerCase() === 'yes';
     const yesNoValue = (value) => {
@@ -302,7 +302,7 @@ const sendApplicationEmail = async (applicationData) => {
     emailHTML += '<hr>';
     emailHTML += `<p><small>Submitted on: ${new Date().toLocaleString()}</small></p>`;
 
-    const from = getFromAddress('HORAS-Cert Website');
+    const from = getFromAddress('horascert.com');
     if (!from) {
       throw new Error('EMAIL_FROM is not set');
     }
@@ -310,7 +310,7 @@ const sendApplicationEmail = async (applicationData) => {
     const mailOptions = {
       from,
       to: getRecipients(),
-      subject: 'New Certification Application',
+      subject: 'New horascert.com Certification Application',
       html: emailHTML,
     };
 
@@ -328,7 +328,7 @@ const sendApplicationReceivedToClient = async ({ to, requestId }) => {
       return { success: false, error: 'Recipient email is required' };
     }
 
-    const from = getFromAddress('HORAS Cert');
+    const from = getFromAddress('horascert.com');
     if (!from) {
       throw new Error('EMAIL_FROM is not set');
     }
@@ -365,7 +365,7 @@ const sendContactAutoReplyToClient = async ({ to, name }) => {
       return { success: false, error: 'Recipient email is required' };
     }
 
-    const from = getFromAddress('HORAS-Cert Website');
+    const from = getFromAddress('horascert.com');
     if (!from) {
       throw new Error('EMAIL_FROM is not set');
     }
@@ -400,7 +400,7 @@ const sendApplicationStatusUpdateToClient = async ({ to, requestId, oldStatus, n
       return { success: false, error: 'Recipient email is required' };
     }
 
-    const from = getFromAddress('HORAS-Cert Website');
+    const from = getFromAddress('horascert.com');
     if (!from) {
       throw new Error('EMAIL_FROM is not set');
     }
@@ -463,7 +463,7 @@ const sendContactEmail = async (contactData) => {
       <p><small>Submitted on: ${new Date().toLocaleString()}</small></p>
     `;
 
-    const from = getFromAddress('HORA Website');
+    const from = getFromAddress('horascert.com');
     if (!from) {
       throw new Error('EMAIL_FROM is not set');
     }
@@ -471,7 +471,7 @@ const sendContactEmail = async (contactData) => {
     const mailOptions = {
       from,
       to: getRecipients(),
-      subject: `Contact Form: ${String(contactData.subject || '')}`,
+      subject: `horascert.com Contact Form: ${String(contactData.subject || '')}`,
       html: emailBody,
     };
 
@@ -506,7 +506,7 @@ const sendCertificateNotification = async (certificate) => {
       <p><small>Created on: ${new Date().toLocaleString()}</small></p>
     `;
 
-    const from = getFromAddress('Horascert.com');
+    const from = getFromAddress('horascert.com');
     if (!from) {
       throw new Error('EMAIL_FROM is not set');
     }
@@ -514,7 +514,7 @@ const sendCertificateNotification = async (certificate) => {
     const mailOptions = {
       from,
       to: getRecipients(),
-      subject: `New Certificate Created: ${certificate.certificateNumber}`,
+      subject: `New Certificate Created: ${certificate.companyName}`,
       html: emailBody,
     };
 
@@ -526,10 +526,177 @@ const sendCertificateNotification = async (certificate) => {
   }
 };
 
+/**
+ * Send training certificate notification email
+ * @param {Object} certificate - TrainingCertificate document
+ * @returns {Promise<Object>} - Email send result
+ */
+const sendTrainingCertificateNotification = async (certificate) => {
+  try {
+    const emailBody = `
+      <h2>New Training Certificate Created</h2>
+      
+      <h3>Training Certificate Information:</h3>
+      <p><strong>Certificate Number:</strong> ${certificate.certificateNumber}</p>
+      <p><strong>Trainee Name:</strong> ${certificate.trainee.name}</p>
+      <p><strong>Organization:</strong> ${certificate.trainee.organization}</p>
+      <p><strong>Course Name:</strong> ${certificate.training.courseName}</p>
+      <p><strong>Category:</strong> ${certificate.training.category}</p>
+      <p><strong>Training Date:</strong> ${certificate.training.date ? new Date(certificate.training.date).toLocaleDateString() : 'N/A'}</p>
+      <p><strong>Duration:</strong> ${certificate.training.hours || 0} hours</p>
+      <p><strong>Trainer:</strong> ${certificate.training.trainer || 'N/A'}</p>
+      <p><strong>Issue Date:</strong> ${certificate.issueDate ? new Date(certificate.issueDate).toLocaleDateString() : 'N/A'}</p>
+      <p><strong>Expiry Date:</strong> ${certificate.expiryDate ? new Date(certificate.expiryDate).toLocaleDateString() : 'N/A'}</p>
+      <p><strong>Status:</strong> ${certificate.status || 'active'}</p>
+      
+      <p><strong>Verification URL:</strong> <a href="${certificate.qrCode}" target="_blank">${certificate.qrCode}</a></p>
+      
+      <hr>
+      <p><small>Created on: ${new Date().toLocaleString()}</small></p>
+    `;
+
+    const from = getFromAddress('horascert.com');
+    if (!from) {
+      throw new Error('EMAIL_FROM is not set');
+    }
+
+    const mailOptions = {
+      from,
+      to: getRecipients(),
+      subject: `New Training Certificate Created: ${certificate.trainee.name}`,
+      html: emailBody,
+    };
+
+    const info = await sendEmail(mailOptions);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    logger.error('Error sending training certificate notification email:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Send training certificate to trainee
+ * @param {Object} certificate - TrainingCertificate document
+ * @returns {Promise<Object>} - Email send result
+ */
+const sendTrainingCertificateToTrainee = async (certificate) => {
+  try {
+    if (!certificate.trainee.email) {
+      return { success: false, error: 'Trainee email is required' };
+    }
+
+    const emailBody = `
+      <h2>Your Training Certificate - HORASCert</h2>
+      
+      <p>Dear ${certificate.trainee.name},</p>
+      
+      <p>Congratulations! Your training certificate has been successfully issued.</p>
+      
+      <h3>Certificate Details:</h3>
+      <p><strong>Certificate Number:</strong> ${certificate.certificateNumber}</p>
+      <p><strong>Course Name:</strong> ${certificate.training.courseName}</p>
+      <p><strong>Training Date:</strong> ${certificate.training.date ? new Date(certificate.training.date).toLocaleDateString() : 'N/A'}</p>
+      <p><strong>Duration:</strong> ${certificate.training.hours || 0} hours</p>
+      <p><strong>Issue Date:</strong> ${certificate.issueDate ? new Date(certificate.issueDate).toLocaleDateString() : 'N/A'}</p>
+      <p><strong>Expiry Date:</strong> ${certificate.expiryDate ? new Date(certificate.expiryDate).toLocaleDateString() : 'N/A'}</p>
+      
+      <h3>Verify Your Certificate</h3>
+      <p>You can verify the authenticity of your certificate by scanning the QR code or visiting:</p>
+      <p><a href="${certificate.qrCode}" target="_blank">${certificate.qrCode}</a></p>
+      
+      <p>Thank you for choosing horascert.com for your training needs.</p>
+      
+      <hr>
+      <p><small>This is an automated message. Please do not reply to this email.</small></p>
+      <p><small>Sent on: ${new Date().toLocaleString()}</small></p>
+    `;
+
+    const from = getFromAddress('horascert.com');
+    if (!from) {
+      throw new Error('EMAIL_FROM is not set');
+    }
+
+    const mailOptions = {
+      from,
+      to: certificate.trainee.email,
+      subject: `Your Training Certificate - ${certificate.trainee.name}`,
+      html: emailBody,
+    };
+
+    const info = await sendEmail(mailOptions);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    logger.error('Error sending training certificate to trainee:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Send ISO certificate to company
+ * @param {Object} certificate - Certificate document
+ * @returns {Promise<Object>} - Email send result
+ */
+const sendCertificateToCompany = async (certificate) => {
+  try {
+    if (!certificate.companyEmail) {
+      return { success: false, error: 'Company email is required' };
+    }
+
+    const emailBody = `
+      <h2>Your ISO Certificate - HORASCert</h2>
+      
+      <p>Hello,</p>
+      
+      <p>Your ISO certificate has been issued successfully.</p>
+      
+      <h3>Certificate Details:</h3>
+      <p><strong>Certificate Number:</strong> ${certificate.certificateNumber}</p>
+      <p><strong>Company:</strong> ${certificate.companyName}</p>
+      <p><strong>Standard:</strong> ${certificate.standard}</p>
+      <p><strong>Scope:</strong> ${certificate.scope}</p>
+      <p><strong>Issue Date:</strong> ${certificate.issueDate ? new Date(certificate.issueDate).toLocaleDateString() : 'N/A'}</p>
+      <p><strong>Expiry Date:</strong> ${certificate.expiryDate ? new Date(certificate.expiryDate).toLocaleDateString() : 'N/A'}</p>
+      
+      <h3>Verify Your Certificate</h3>
+      <p>You can verify the authenticity of your certificate by visiting:</p>
+      <p><a href="${process.env.FRONTEND_URL}/certificate/${certificate.certificateId}" target="_blank">${process.env.FRONTEND_URL}/certificate/${certificate.certificateId}</a></p>
+      
+      <p>Thank you.</p>
+      <p><strong>horascert.com</strong></p>
+      
+      <hr>
+      <p><small>This is an automated message. Please do not reply to this email.</small></p>
+      <p><small>Sent on: ${new Date().toLocaleString()}</small></p>
+    `;
+
+    const from = getFromAddress('horascert.com');
+    if (!from) {
+      throw new Error('EMAIL_FROM is not set');
+    }
+
+    const mailOptions = {
+      from,
+      to: certificate.companyEmail,
+      subject: `Your ISO Certificate - ${certificate.companyName}`,
+      html: emailBody,
+    };
+
+    const info = await sendEmail(mailOptions);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    logger.error('Error sending ISO certificate to company:', error);
+    return { success: false, error: error.message };
+  }
+};
+
 module.exports = {
   sendApplicationEmail,
   sendContactEmail,
   sendCertificateNotification,
+  sendCertificateToCompany,
+  sendTrainingCertificateNotification,
+  sendTrainingCertificateToTrainee,
   sendApplicationReceivedToClient,
   sendContactAutoReplyToClient,
   sendApplicationStatusUpdateToClient

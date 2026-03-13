@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const QRCode = require('qrcode');
 const { v4: uuidv4 } = require('uuid');
 const he = require('he');
-const { sendCertificateNotification } = require('../config/email');
+const { sendCertificateNotification, sendCertificateToCompany } = require('../config/email');
 const { ApiError } = require('../middleware/errorHandler');
 const { certificateCache } = require('../utils/cache');
 const logger = require('../utils/logger');
@@ -54,6 +54,7 @@ const createCertificate = async (req, res, next) => {
         const {
             certificateNumber,
             companyName,
+            companyEmail,
             issueDate,
             expiryDate,
             companyAddress,
@@ -106,6 +107,7 @@ const createCertificate = async (req, res, next) => {
             certificateId: generatedCertificateId,
             certificateNumber: String(certificateNumber).trim(),
             companyName,
+            companyEmail,
             companyAddress: parsedAddress,
             standard,
             standardDescription,
@@ -127,14 +129,25 @@ const createCertificate = async (req, res, next) => {
         });
 
         // 🔄 BACKGROUND PROCESSING (non-blocking)
-        // Send notification email asynchronously without awaiting
+        // Send notification emails asynchronously without awaiting
         setImmediate(async () => {
             try {
+                // Send admin notification
                 await sendCertificateNotification(certificate);
                 logger.info(`Notification email sent for certificate ${certificate.certificateNumber}`);
+
+                // Send company email if provided
+                if (certificate.companyEmail) {
+                    const companyResult = await sendCertificateToCompany(certificate);
+                    if (companyResult.success) {
+                        logger.info(`Certificate email sent to company ${certificate.companyEmail}`);
+                    } else {
+                        logger.warn(`Failed to send certificate email to company: ${companyResult.error}`);
+                    }
+                }
             } catch (emailError) {
                 // Log error but don't crash - email failure shouldn't block certificate creation
-                logger.error(`Failed to send notification email for ${certificate.certificateNumber}:`, emailError);
+                logger.error(`Failed to send notification emails for ${certificate.certificateNumber}:`, emailError);
             }
         });
 

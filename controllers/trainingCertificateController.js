@@ -1,6 +1,7 @@
 const TrainingCertificate = require('../models/TrainingCertificate');
 const QRCode = require('qrcode');
 const he = require('he');
+const { sendTrainingCertificateNotification, sendTrainingCertificateToTrainee } = require('../config/email');
 const { ApiError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 
@@ -160,6 +161,29 @@ exports.createTrainingCertificate = async (req, res, next) => {
             success: true,
             data: certificate,
             qrCodeImage, // QR PNG as base64 for direct display
+        });
+
+        // 🔄 BACKGROUND PROCESSING (non-blocking)
+        // Send notification emails asynchronously without awaiting
+        setImmediate(async () => {
+            try {
+                // Send admin notification
+                await sendTrainingCertificateNotification(certificate);
+                logger.info(`Training certificate notification email sent for ${certificate.certificateNumber}`);
+
+                // Send email to trainee if email is provided
+                if (certificate.trainee.email) {
+                    const traineeResult = await sendTrainingCertificateToTrainee(certificate);
+                    if (traineeResult.success) {
+                        logger.info(`Training certificate email sent to trainee ${certificate.trainee.email}`);
+                    } else {
+                        logger.warn(`Failed to send training certificate email to trainee: ${traineeResult.error}`);
+                    }
+                }
+            } catch (emailError) {
+                // Log error but don't crash - email failure shouldn't block certificate creation
+                logger.error(`Failed to send training certificate notification emails for ${certificate.certificateNumber}:`, emailError);
+            }
         });
     } catch (error) {
         next(error);
