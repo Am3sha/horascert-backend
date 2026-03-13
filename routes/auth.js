@@ -130,17 +130,6 @@ router.get('/verify', (req, res) => {
         // Verify token
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-        // Legacy env-admin token support
-        if (decoded && decoded.user && decoded.user.id === 'admin') {
-            return res.json({
-                success: true,
-                admin: {
-                    username: decoded.user.username,
-                    role: decoded.user.role
-                }
-            });
-        }
-
         return User.findById(decoded.id)
             .then((user) => {
                 if (!user) {

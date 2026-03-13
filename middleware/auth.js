@@ -28,13 +28,6 @@ const auth = async (req, res, next) => {
             // Verify token
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-            // Support legacy env-admin JWTs issued by server/routes/auth.js
-            if (decoded && decoded.user && decoded.user.role && decoded.user.id === 'admin') {
-                req.user = decoded.user;
-                res.locals.user = decoded.user;
-                return next();
-            }
-
             // Check if user still exists
             const currentUser = await User.findById(decoded.id);
             if (!currentUser) {

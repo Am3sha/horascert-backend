@@ -1,11 +1,33 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
+const he = require('he');
 const Email = require('../models/Email');
 const { sendContactEmail, sendContactAutoReplyToClient } = require('../config/email');
 const { contactEmailLimiter } = require('../middleware/rateLimiters');
 const logger = require('../utils/logger');
 
 const router = express.Router();
+
+// Helper function to sanitize user input strings
+const sanitizeInput = (obj) => {
+    if (typeof obj !== 'object' || obj === null) return obj;
+
+    if (Array.isArray(obj)) {
+        return obj.map(item => sanitizeInput(item));
+    }
+
+    const sanitized = {};
+    for (const [key, value] of Object.entries(obj)) {
+        if (typeof value === 'string') {
+            sanitized[key] = he.encode(value.trim());
+        } else if (typeof value === 'object' && value !== null) {
+            sanitized[key] = sanitizeInput(value);
+        } else {
+            sanitized[key] = value;
+        }
+    }
+    return sanitized;
+};
 
 const contactValidation = [
     body('name').trim().isLength({ min: 2, max: 100 }).withMessage('Name must be between 2 and 100 characters'),
@@ -26,7 +48,9 @@ router.post('/', contactEmailLimiter, contactValidation, async (req, res) => {
             });
         }
 
-        const { name, email, phone, subject, message, type } = req.body;
+        // Sanitize all user input to prevent XSS
+        const sanitizedBody = sanitizeInput(req.body);
+        const { name, email, phone, subject, message, type } = sanitizedBody;
 
         const created = await Email.create({
             senderName: name,

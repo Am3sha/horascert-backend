@@ -1,7 +1,29 @@
 const TrainingCertificate = require('../models/TrainingCertificate');
 const QRCode = require('qrcode');
+const he = require('he');
 const { ApiError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
+
+// Helper function to sanitize user input strings
+const sanitizeInput = (obj) => {
+    if (typeof obj !== 'object' || obj === null) return obj;
+
+    if (Array.isArray(obj)) {
+        return obj.map(item => sanitizeInput(item));
+    }
+
+    const sanitized = {};
+    for (const [key, value] of Object.entries(obj)) {
+        if (typeof value === 'string') {
+            sanitized[key] = he.encode(value.trim());
+        } else if (typeof value === 'object' && value !== null) {
+            sanitized[key] = sanitizeInput(value);
+        } else {
+            sanitized[key] = value;
+        }
+    }
+    return sanitized;
+};
 
 // Helper function: Get default expiry date (1 year from now)
 function getDefaultExpiry() {
@@ -66,6 +88,8 @@ function validateTrainingCertificateInput(data) {
 // @access  Private/Admin
 exports.createTrainingCertificate = async (req, res, next) => {
     try {
+        // Sanitize all user input to prevent XSS
+        const sanitizedBody = sanitizeInput(req.body);
         const {
             certificateNumber,
             trainee,
@@ -73,7 +97,7 @@ exports.createTrainingCertificate = async (req, res, next) => {
             issueDate,
             expiryDate,
             notes,
-        } = req.body;
+        } = sanitizedBody;
 
         let certNumber = certificateNumber;
 

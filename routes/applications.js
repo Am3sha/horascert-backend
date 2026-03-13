@@ -1,8 +1,9 @@
 const express = require('express');
 const multer = require('multer');
 const { body, validationResult } = require('express-validator');
+const he = require('he');
 const { sendApplicationEmail, sendContactEmail, sendApplicationReceivedToClient } = require('../config/email');
-const { applicationLimiter, contactEmailLimiter } = require('../middleware/rateLimiters');
+const { applicationLimiter, contactEmailLimiter, uploadLimiter } = require('../middleware/rateLimiters');
 const Request = require('../models/Request');
 const Email = require('../models/Email');
 const logger = require('../utils/logger');
@@ -10,6 +11,27 @@ const { uploadFile, getSignedFileUrl } = require('../services/supabaseStorage');
 const { auth, restrictTo } = require('../middleware/auth');
 
 const router = express.Router();
+
+// Helper function to sanitize user input strings
+const sanitizeInput = (obj) => {
+  if (typeof obj !== 'object' || obj === null) return obj;
+
+  if (Array.isArray(obj)) {
+    return obj.map(item => sanitizeInput(item));
+  }
+
+  const sanitized = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (typeof value === 'string') {
+      sanitized[key] = he.encode(value.trim());
+    } else if (typeof value === 'object' && value !== null) {
+      sanitized[key] = sanitizeInput(value);
+    } else {
+      sanitized[key] = value;
+    }
+  }
+  return sanitized;
+};
 
 // Configure multer for file uploads (memory storage)
 const upload = multer({
@@ -23,11 +45,25 @@ const upload = multer({
       'image/jpeg',
       'image/png'
     ];
-    if (allowedMimes.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only PDF, DOC, DOCX, JPEG, and PNG files are allowed'));
+
+    const allowedExtensions = ['pdf', 'jpg', 'jpeg', 'png', 'doc', 'docx'];
+    const fileExtension = file.originalname.split('.').pop().toLowerCase();
+
+    // Check both MIME type and file extension
+    if (!allowedMimes.includes(file.mimetype)) {
+      return cb(new Error('Invalid file type. Only PDF, DOC, DOCX, JPEG, and PNG files are allowed'));
     }
+
+    if (!allowedExtensions.includes(fileExtension)) {
+      return cb(new Error('Invalid file extension. Only PDF, DOC, DOCX, JPEG, and PNG files are allowed'));
+    }
+
+    // Additional validation: ensure filename doesn't contain suspicious characters
+    if (file.originalname.includes('..') || file.originalname.includes('/') || file.originalname.includes('\\')) {
+      return cb(new Error('Invalid filename'));
+    }
+
+    cb(null, true);
   }
 });
 
@@ -61,7 +97,7 @@ const contactValidation = [
  * POST /api/applications
  * Submit a new certification application with file uploads
  */
-router.post('/', applicationLimiter, upload.array('file', 3), applicationValidation, async (req, res) => {
+router.post('/', applicationLimiter, uploadLimiter, upload.array('file', 3), applicationValidation, async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -72,6 +108,9 @@ router.post('/', applicationLimiter, upload.array('file', 3), applicationValidat
         errors: errors.array()
       });
     }
+
+    // Sanitize all user input to prevent XSS
+    const sanitizedBody = sanitizeInput(req.body);
 
     const {
       companyName,
@@ -125,7 +164,7 @@ router.post('/', applicationLimiter, upload.array('file', 3), applicationValidat
       iso22000ProcessingType,
       iso45001HazardsIdentified,
       iso45001CriticalRisks,
-    } = req.body;
+    } = sanitizedBody;
 
     const parseOptionalNumber = (value) => {
       if (value === null || value === undefined) return null;
@@ -135,8 +174,8 @@ router.post('/', applicationLimiter, upload.array('file', 3), applicationValidat
       return Number.isFinite(n) ? n : null;
     };
 
-    const resolvedContactEmail = contactEmail || email || req.body.email || '';
-    const resolvedContactPhone = contactPhone || telephone || req.body.telephone || req.body.phone || '';
+    const resolvedContactEmail = contactEmail || email || sanitizedBody.email || '';
+    const resolvedContactPhone = contactPhone || telephone || sanitizedBody.telephone || sanitizedBody.phone || '';
 
     if (!resolvedContactEmail) {
       return res.status(400).json({
@@ -154,12 +193,12 @@ router.post('/', applicationLimiter, upload.array('file', 3), applicationValidat
       });
     }
     const resolvedCompanyAddress = companyAddress || [
-      addressLine1 || req.body.addressLine1,
-      addressLine2 || req.body.addressLine2,
-      city || req.body.city,
-      state || req.body.state,
-      postalCode || req.body.postalCode,
-      country || req.body.country
+      addressLine1 || sanitizedBody.addressLine1,
+      addressLine2 || sanitizedBody.addressLine2,
+      city || sanitizedBody.city,
+      state || sanitizedBody.state,
+      postalCode || sanitizedBody.postalCode,
+      country || sanitizedBody.country
     ].filter(Boolean).join(', ');
 
     // Parse standards if it's a JSON string
@@ -261,7 +300,7 @@ router.post('/', applicationLimiter, upload.array('file', 3), applicationValidat
 
     // Capture request data for background processing (uploads + emails)
     const requestId = savedRequest._id.toString();
-    const requestBody = req.body;
+    const requestBody = sanitizedBody;
     const requestFiles = Array.isArray(req.files) ? req.files : [];
 
 

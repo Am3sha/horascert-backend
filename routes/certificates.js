@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const rateLimit = require('express-rate-limit');
+const { certificateLimiter } = require('../middleware/rateLimiters');
 const {
     createCertificate,
     getCertificates,
@@ -64,6 +65,7 @@ router.post(
     '/',
     auth,
     restrictTo('admin'),
+    certificateLimiter,
     asyncHandler(createCertificate)
 );
 

@@ -57,9 +57,46 @@ const contactEmailLimiter = rateLimit({
     }
 });
 
+// File upload limiter: 3 uploads per 10 minutes per IP (stricter for file uploads)
+const uploadLimiter = rateLimit({
+    windowMs: 10 * 60 * 1000, // 10 minutes
+    max: 3,
+    keyGenerator: getClientIp, // Use custom IP extractor
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res) => {
+        return res.status(429).json({
+            success: false,
+            error: 'TooManyRequests',
+            message: 'Too many file uploads. Please try again later.'
+        });
+    }
+});
+
+// Certificate creation limiter: 5 per hour per authenticated user
+const certificateLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: 5,
+    keyGenerator: (req) => {
+        // Use user ID if authenticated, otherwise IP
+        return req.user?._id?.toString() || getClientIp(req);
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res) => {
+        return res.status(429).json({
+            success: false,
+            error: 'TooManyRequests',
+            message: 'Too many certificates created. Please try again later.'
+        });
+    }
+});
+
 module.exports = {
     loginLimiter,
     applicationLimiter,
     contactEmailLimiter,
+    uploadLimiter,
+    certificateLimiter,
     getClientIp
 };

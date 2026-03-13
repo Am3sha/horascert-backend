@@ -93,5 +93,12 @@ const trainingCertificateSchema = new mongoose.Schema({
 // Indexes
 trainingCertificateSchema.index({ certificateNumber: 1 });
 trainingCertificateSchema.index({ qrCode: 1 });
+trainingCertificateSchema.index({ 'trainee.name': 'text' });
+trainingCertificateSchema.index({ 'training.courseName': 'text' });
+trainingCertificateSchema.index({ status: 1 });
+trainingCertificateSchema.index({ issueDate: -1 });
+trainingCertificateSchema.index({ expiryDate: 1 });
+trainingCertificateSchema.index({ createdAt: -1 });
+trainingCertificateSchema.index({ status: 1, createdAt: -1 });
 
 module.exports = mongoose.model('TrainingCertificate', trainingCertificateSchema);

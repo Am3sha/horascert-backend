@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { certificateLimiter } = require('../middleware/rateLimiters');
 const {
     createTrainingCertificate,
     getAllTrainingCertificates,
@@ -20,7 +21,7 @@ router.use(restrictTo('admin'));
 
 router.route('/')
     .get(getAllTrainingCertificates)
-    .post(createTrainingCertificate);
+    .post(certificateLimiter, createTrainingCertificate);
 
 router.route('/stats')
     .get(getTrainingCertificateStats);

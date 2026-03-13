@@ -2,10 +2,32 @@ const Certificate = require('../models/Certificate');
 const mongoose = require('mongoose');
 const QRCode = require('qrcode');
 const { v4: uuidv4 } = require('uuid');
+const he = require('he');
 const { sendCertificateNotification } = require('../config/email');
 const { ApiError } = require('../middleware/errorHandler');
 const { certificateCache } = require('../utils/cache');
 const logger = require('../utils/logger');
+
+// Helper function to sanitize user input strings
+const sanitizeInput = (obj) => {
+    if (typeof obj !== 'object' || obj === null) return obj;
+
+    if (Array.isArray(obj)) {
+        return obj.map(item => sanitizeInput(item));
+    }
+
+    const sanitized = {};
+    for (const [key, value] of Object.entries(obj)) {
+        if (typeof value === 'string') {
+            sanitized[key] = he.encode(value.trim());
+        } else if (typeof value === 'object' && value !== null) {
+            sanitized[key] = sanitizeInput(value);
+        } else {
+            sanitized[key] = value;
+        }
+    }
+    return sanitized;
+};
 
 const mapStatus = (s) => String(s || '').toLowerCase();
 const normalizeCertificateStatus = (doc) => {
@@ -27,6 +49,8 @@ const normalizeCertificateStatus = (doc) => {
  */
 const createCertificate = async (req, res, next) => {
     try {
+        // Sanitize all user input to prevent XSS
+        const sanitizedBody = sanitizeInput(req.body);
         const {
             certificateNumber,
             companyName,
@@ -36,11 +60,23 @@ const createCertificate = async (req, res, next) => {
             standard,
             standardDescription,
             scope
-        } = req.body;
+        } = sanitizedBody;
 
         // Validate required fields
         if (!certificateNumber || !companyName || !issueDate || !expiryDate || !standard || !scope) {
             return next(new ApiError(400, 'Missing required fields'));
+        }
+
+        // Validate date logic: expiry must be after issue
+        const issueDateObj = new Date(issueDate);
+        const expiryDateObj = new Date(expiryDate);
+
+        if (isNaN(issueDateObj.getTime()) || isNaN(expiryDateObj.getTime())) {
+            return next(new ApiError(400, 'Invalid date format'));
+        }
+
+        if (expiryDateObj <= issueDateObj) {
+            return next(new ApiError(400, 'Expiry date must be after issue date'));
         }
 
         // Check for duplicate

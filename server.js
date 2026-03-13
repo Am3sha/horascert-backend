@@ -35,9 +35,25 @@ app.set('trust proxy', 1);
 // Remove identifying header
 app.disable('x-powered-by');
 
-// Security headers (kept conservative to avoid breaking React/Vercel/Supabase flows)
+// Security headers with CSP to prevent XSS
 app.use(helmet({
-    contentSecurityPolicy: false,
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            styleSrcAttr: ["'unsafe-inline'"],
+            imgSrc: ["'self'", "data:", "https:"],
+            fontSrc: ["'self'", "https:", "data:"],
+            connectSrc: ["'self'", "https://api.supabase.io", "https://horascert.com", "https://www.horascert.com", "https://horascert.vercel.app"],
+            frameSrc: ["'none'"],
+            objectSrc: ["'none'"],
+            mediaSrc: ["'self'"],
+            manifestSrc: ["'self'"],
+            workerSrc: ["'self'"],
+            childSrc: ["'none'"]
+        }
+    },
     crossOriginEmbedderPolicy: false,
     crossOriginResourcePolicy: false,
     strictTransportSecurity: process.env.NODE_ENV === 'production'
