@@ -43,10 +43,10 @@ emailSchema.index({ status: 1 });
 emailSchema.index({ senderEmail: 1 });
 emailSchema.index({ createdAt: -1 });
 
-// TTL Index: Auto-delete emails after 4 months (120 days)
+// TTL Index: Auto-delete emails after 2 months (60 days)
 emailSchema.index(
     { createdAt: 1 },
-    { expireAfterSeconds: 60 * 60 * 24 * 120 }
+    { expireAfterSeconds: 60 * 60 * 24 * 60 }
 );
 
 // Pre-save hook to set repliedAt when replying and truncate message

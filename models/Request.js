@@ -56,6 +56,7 @@ const requestSchema = new mongoose.Schema({
     iso22000ProcessingType: String,
     iso45001HazardsIdentified: String,
     iso45001CriticalRisks: String,
+    certificationScope: String,
     serviceType: {
         type: String,
         required: true,
@@ -115,6 +116,12 @@ requestSchema.index({ status: 1 });
 requestSchema.index({ email: 1 });
 requestSchema.index({ companyName: 'text', clientName: 'text' });
 requestSchema.index({ createdAt: -1 });
+
+// TTL Index: Auto-delete application requests after 3 months (90 days)
+requestSchema.index(
+    { createdAt: 1 },
+    { expireAfterSeconds: 60 * 60 * 24 * 90 }
+);
 
 // Add a follow-up to a request
 requestSchema.methods.addFollowUp = async function (note, by) {

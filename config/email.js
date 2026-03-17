@@ -214,6 +214,14 @@ const sendApplicationEmail = async (applicationData) => {
     if (certificationsText) {
       emailHTML += formatField('Certifications Requested', certificationsText);
     }
+
+    // ALWAYS show Certification Scope - it's a critical required field
+    // Use fallback if empty: "Not provided"
+    const scopeValue = (applicationData.certificationScope && String(applicationData.certificationScope).trim())
+      ? applicationData.certificationScope
+      : 'Not provided';
+    emailHTML += `<p><strong>Certification Scope:</strong> ${he.encode(String(scopeValue), { useNamedReferences: true })}</p>`;
+
     emailHTML += formatField('Certification Programme', applicationData.certificationProgramme);
     emailHTML += formatField('Current Certifications', applicationData.currentCertifications);
     if (applicationData.transferReason) {

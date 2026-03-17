@@ -25,10 +25,10 @@ const loginLimiter = rateLimit({
     }
 });
 
-// Application submission limiter: 10 per hour per IP
+// Application submission limiter: 30 per hour per IP
 const applicationLimiter = rateLimit({
     windowMs: 60 * 60 * 1000, // 1 hour
-    max: 10,
+    max: 30,
     keyGenerator: getClientIp, // Use custom IP extractor
     standardHeaders: true,
     legacyHeaders: false,
@@ -41,10 +41,10 @@ const applicationLimiter = rateLimit({
     }
 });
 
-// Email contact form limiter: 5 per hour per IP
+// Email contact form limiter: 20 per hour per IP
 const contactEmailLimiter = rateLimit({
     windowMs: 60 * 60 * 1000, // 1 hour
-    max: 5,
+    max: 15,
     keyGenerator: getClientIp, // Use custom IP extractor
     standardHeaders: true,
     legacyHeaders: false,
@@ -57,10 +57,10 @@ const contactEmailLimiter = rateLimit({
     }
 });
 
-// File upload limiter: 3 uploads per 10 minutes per IP (stricter for file uploads)
+// File upload limiter: 20 uploads per 1 hour per IP
 const uploadLimiter = rateLimit({
-    windowMs: 10 * 60 * 1000, // 10 minutes
-    max: 3,
+    windowMs: 60 * 60 * 1000, // 1 hour  
+    max: 20,
     keyGenerator: getClientIp, // Use custom IP extractor
     standardHeaders: true,
     legacyHeaders: false,

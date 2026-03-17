@@ -19,13 +19,16 @@ router.get('/verify/:qrCode', verifyTrainingCertificate);
 router.use(auth);
 router.use(restrictTo('admin'));
 
+// ✅ SPECIFIC ROUTES FIRST
+router.route('/stats')
+    .get(getTrainingCertificateStats);
+
+// LIST & CREATE
 router.route('/')
     .get(getAllTrainingCertificates)
     .post(certificateLimiter, createTrainingCertificate);
 
-router.route('/stats')
-    .get(getTrainingCertificateStats);
-
+// ✅ CATCH-ALL MUST BE LAST
 router.route('/:id')
     .get(getTrainingCertificateById)
     .put(updateTrainingCertificate)

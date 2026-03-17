@@ -12,7 +12,8 @@ const { auth, restrictTo } = require('../middleware/auth');
 
 const router = express.Router();
 
-// Helper function to sanitize user input strings
+// Helper function to sanitize user input strings (remove whitespace, prevent injection)
+// Does NOT encode to HTML entities - keeps text as-is for proper display
 const sanitizeInput = (obj) => {
   if (typeof obj !== 'object' || obj === null) return obj;
 
@@ -23,7 +24,9 @@ const sanitizeInput = (obj) => {
   const sanitized = {};
   for (const [key, value] of Object.entries(obj)) {
     if (typeof value === 'string') {
-      sanitized[key] = he.encode(value.trim());
+      // Just trim whitespace, don't encode to HTML entities
+      // HTML entities will be handled at display/email level if needed
+      sanitized[key] = value.trim();
     } else if (typeof value === 'object' && value !== null) {
       sanitized[key] = sanitizeInput(value);
     } else {
@@ -164,6 +167,7 @@ router.post('/', applicationLimiter, uploadLimiter, upload.array('file', 3), app
       iso22000ProcessingType,
       iso45001HazardsIdentified,
       iso45001CriticalRisks,
+      certificationScope,
     } = sanitizedBody;
 
     const parseOptionalNumber = (value) => {
@@ -260,6 +264,7 @@ router.post('/', applicationLimiter, uploadLimiter, upload.array('file', 3), app
       iso22000ProcessingType: iso22000ProcessingType || '',
       iso45001HazardsIdentified: iso45001HazardsIdentified || '',
       iso45001CriticalRisks: iso45001CriticalRisks || '',
+      certificationScope: certificationScope || '',
       serviceType: parsedStandards.length > 0 ? parsedStandards[0] : 'General',
       standards: parsedStandards,
       numberOfEmployees: parseOptionalNumber(numberOfEmployees),
@@ -430,6 +435,7 @@ router.post('/', applicationLimiter, uploadLimiter, upload.array('file', 3), app
 
           // Certification Details
           certificationsRequested: JSON.stringify(parsedStandards),
+          certificationScope: requestBody.certificationScope,
           certificationProgramme: requestBody.certificationProgramme,
           currentCertifications: requestBody.currentCertifications,
           preferredAuditDate: requestBody.preferredAuditDate,
