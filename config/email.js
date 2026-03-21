@@ -1,48 +1,34 @@
-const nodemailer = require('nodemailer');
 const https = require('https');
 const he = require('he');
 const logger = require('../utils/logger');
 
-// Create reusable transporter object using SMTP transport
-const createTransporter = () => {
-  return nodemailer.createTransport({
-    host: process.env.EMAIL_HOST || process.env.MAIL_HOST || 'smtp.gmail.com',
-    port: parseInt(process.env.EMAIL_PORT || process.env.MAIL_PORT || '587'),
-    secure: process.env.EMAIL_SECURE === 'true' || process.env.MAIL_SECURE === 'true', // true for 465, false for other ports
-    auth: {
-      user: process.env.MAIL_USER || process.env.EMAIL_USER,
-      pass: process.env.MAIL_PASS || process.env.EMAIL_PASS || process.env.EMAIL_PASSWORD,
-    },
-  });
-};
-
 const RESEND_API_HOST = 'api.resend.com';
+const COMPANY_EMAIL = 'info@horascert.com';
 
-const getRecipients = () => {
-  const raw = String(process.env.EMAIL_TO || 'info@horascert.com');
-  const recipients = raw
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return recipients.length > 1 ? recipients : recipients[0];
-};
-
-const getFromAddress = (displayName) => {
-  const fromEmail = process.env.EMAIL_FROM || process.env.MAIL_USER || process.env.EMAIL_USER;
-  if (!fromEmail) return null;
-  if (displayName) {
-    return `"${displayName}" <${fromEmail}>`;
-  }
-  return String(fromEmail);
-};
-
-const sendWithResend = async ({ from, to, subject, html }) => {
+/**
+ * Core email sender using Resend API
+ * @param {Object} params - Email parameters
+ * @param {string} params.to - Recipient email (dynamic)
+ * @param {string} params.subject - Email subject
+ * @param {string} params.html - Email HTML body
+ * @param {string} params.from - Optional from address (defaults to EMAIL_FROM)
+ * @returns {Promise<Object>} - Email send result with messageId
+ */
+const sendEmail = async ({ to, subject, html, from }) => {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
     throw new Error('RESEND_API_KEY is not set');
   }
 
-  const payload = JSON.stringify({ from, to, subject, html });
+  const fromAddress = from || process.env.EMAIL_FROM || 'HORAS <info@horascert.com>';
+
+  if (!to) {
+    throw new Error('Recipient email (to) is required');
+  }
+
+  logger.info('Sending email', { to, subject });
+
+  const payload = JSON.stringify({ from: fromAddress, to, subject, html });
 
   return new Promise((resolve, reject) => {
     const req = https.request(
@@ -67,6 +53,7 @@ const sendWithResend = async ({ from, to, subject, html }) => {
           try {
             const parsed = data ? JSON.parse(data) : null;
             if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+              logger.info('Email sent successfully', { to, messageId: parsed?.id });
               resolve(parsed);
               return;
             }
@@ -96,19 +83,12 @@ const sendWithResend = async ({ from, to, subject, html }) => {
   });
 };
 
-const sendEmail = async ({ from, to, subject, html }) => {
-  if (process.env.RESEND_API_KEY) {
-    const result = await sendWithResend({ from, to, subject, html });
-    return { messageId: result && result.id };
-  }
-
-  const transporter = createTransporter();
-  return transporter.sendMail({ from, to, subject, html });
-};
+// ============================================================
+// EMAIL TEMPLATES & FUNCTIONS
+// ============================================================
 
 /**
  * Helper: Format field for email display
- * Returns formatted HTML or empty string (doesn't show field if value is falsy)
  */
 const formatField = (label, value) => {
   if (!value || value === 'N/A' || value === 'Not specified' || value === 'undefined') {
@@ -121,7 +101,6 @@ const formatField = (label, value) => {
 
 /**
  * Helper: Build address from components
- * Only shows non-empty parts, properly formatted
  */
 const buildAddress = (address1, address2, city, state, postal, country) => {
   const parts = [address1, address2, city, state, postal, country]
@@ -130,29 +109,116 @@ const buildAddress = (address1, address2, city, state, postal, country) => {
   return parts || null;
 };
 
+/**
+ * Helper: Escape HTML
+ */
 const escapeHtml = (value) => {
   if (value === null || value === undefined) return '';
   return he.encode(String(value), { useNamedReferences: true });
 };
 
+// ============================================================
+// 1. APPLICATION EMAILS
+// ============================================================
+
 /**
- * Send email notification for new application
+ * Send application notification to company with DYNAMIC form data
+ * Only shows fields that have actual data (no empty/undefined values)
+ * Includes uploaded files as downloadable links
  * @param {Object} applicationData - Complete application form data
- * @returns {Promise<Object>} - Email send result
  */
 const sendApplicationEmail = async (applicationData) => {
   try {
-    // Parse certifications array safely
-    const certifications = applicationData.certificationsRequested
-      ? (typeof applicationData.certificationsRequested === 'string'
-        ? JSON.parse(applicationData.certificationsRequested)
-        : applicationData.certificationsRequested)
-      : [];
-    const certificationsText = Array.isArray(certifications) && certifications.length > 0
-      ? certifications.join(', ')
-      : null;
+    // ========== HELPER FUNCTIONS ==========
 
-    // Build address from components
+    /**
+     * Check if a value is empty/undefined/invalid
+     */
+    const isEmpty = (value) => {
+      if (!value) return true;
+      const str = String(value).trim();
+      if (!str) return true;
+      if (str === 'undefined' || str === 'N/A' || str === 'None' || str === 'Not provided' || str === 'Not Provided') return true;
+      if (str === 'null') return true;
+      return false;
+    };
+
+    /**
+     * Render a single field with label and value
+     */
+    const renderField = (label, value) => {
+      if (isEmpty(value)) return '';
+      const safeValue = escapeHtml(String(value).trim());
+      return `<p>${escapeHtml(label)}: <strong>${safeValue}</strong></p>`;
+    };
+
+    /**
+     * Render a section only if it has at least one populated field
+     */
+    const renderSection = (title, icon, fields) => {
+      // Filter out empty fields
+      const populatedFields = fields.filter(field => !isEmpty(field));
+
+      // If no populated fields, return empty string (section won't appear)
+      if (populatedFields.length === 0) return '';
+
+      return `
+        <h3 style="color: #0066cc; margin-top: 20px;">${icon} ${escapeHtml(title)}</h3>
+        <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px;">
+          ${populatedFields.join('')}
+        </div>
+      `;
+    };
+
+    /**
+     * Render uploaded files section
+     */
+    const renderFilesSection = (files) => {
+      if (!Array.isArray(files) || files.length === 0) return '';
+
+      const filesList = files
+        .filter(file => file && file.name)
+        .map(file => {
+          const fileName = escapeHtml(file.name);
+          const fileUrl = file.publicUrl || file.url || '';
+
+          if (fileUrl) {
+            return `<li><a href="${escapeHtml(fileUrl)}" style="color: #0066cc; text-decoration: none;">📎 ${fileName}</a></li>`;
+          }
+          return `<li>📎 ${fileName}</li>`;
+        })
+        .join('');
+
+      if (!filesList) return '';
+
+      return `
+        <h3 style="color: #0066cc; margin-top: 20px;">📁 Uploaded Files</h3>
+        <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px;">
+          <ul style="list-style: none; padding: 0; margin: 0;">
+            ${filesList}
+          </ul>
+        </div>
+      `;
+    };
+
+    // ========== PARSE AND EXTRACT DATA ==========
+
+    // Parse certifications
+    let certificationsText = '';
+    try {
+      const certifications = applicationData.certificationsRequested
+        ? (typeof applicationData.certificationsRequested === 'string'
+          ? JSON.parse(applicationData.certificationsRequested)
+          : applicationData.certificationsRequested)
+        : [];
+      if (Array.isArray(certifications) && certifications.length > 0) {
+        certificationsText = certifications.join(', ');
+      }
+    } catch (e) {
+      logger.warn('Failed to parse certifications', { error: e.message });
+    }
+
+    // Build formatted address
     const formattedAddress = buildAddress(
       applicationData.addressLine1,
       applicationData.addressLine2,
@@ -162,289 +228,267 @@ const sendApplicationEmail = async (applicationData) => {
       applicationData.country
     );
 
-    // ========================================================================
-    // Build email HTML with only non-empty fields
-    // Uses helper functions to avoid N/A and undefined values
-    // ========================================================================
-    let emailHTML = '<h2>New horascert.com Application</h2>';
+    // ========== BUILD DYNAMIC EMAIL HTML ==========
+    // Each section is built conditionally - only appears if it has data
 
-    const isYes = (value) => String(value || '').trim().toLowerCase() === 'yes';
-    const yesNoValue = (value) => {
-      const v = String(value || '').trim().toLowerCase();
-      if (v === 'yes') return 'Yes';
-      if (v === 'no') return 'No';
-      return value;
-    };
+    const contactInfoFields = [
+      renderField('Name', applicationData.contactPersonName || applicationData.name),
+      renderField('Email', applicationData.contactEmail || applicationData.email),
+      renderField('Phone', applicationData.contactPhone || applicationData.phone),
+      renderField('Position', applicationData.contactPersonPosition),
+      renderField('Mobile', applicationData.contactPersonMobile)
+    ];
 
-    // Contact Information Section
-    emailHTML += '<h3>Contact Information:</h3>';
-    emailHTML += formatField('Name', applicationData.contactPersonName || applicationData.name);
-    emailHTML += formatField('Email', applicationData.contactEmail || applicationData.email);
-    emailHTML += formatField('Phone', applicationData.contactPhone || applicationData.phone);
+    const companyInfoFields = [
+      renderField('Company Name', applicationData.companyName),
+      renderField('Address', formattedAddress),
+      renderField('Website', applicationData.website),
+      renderField('Telephone', applicationData.telephone),
+      renderField('Fax', applicationData.fax),
+      renderField('Industry', applicationData.industry),
+      renderField('Company Size', applicationData.companySize),
+      renderField('Number of Employees', applicationData.numberOfEmployees),
+      renderField('Number of Locations', applicationData.numberOfLocations)
+    ];
 
-    // Company Information Section
-    emailHTML += '<h3>Company Information:</h3>';
-    emailHTML += formatField('Company Name', applicationData.companyName);
-    emailHTML += formatField('Address', formattedAddress);
-    emailHTML += formatField('Website', applicationData.website);
-    emailHTML += formatField('Telephone', applicationData.telephone);
-    emailHTML += formatField('Fax', applicationData.fax);
-    emailHTML += formatField('Industry', applicationData.industry);
-    emailHTML += formatField('Company Size', applicationData.companySize);
-    emailHTML += formatField('Number of Employees', applicationData.numberOfEmployees);
-    emailHTML += formatField('Number of Locations', applicationData.numberOfLocations);
+    const executiveManagerFields = [
+      renderField('Name', applicationData.executiveManagerName),
+      renderField('Email', applicationData.executiveManagerEmail),
+      renderField('Mobile', applicationData.executiveManagerMobile)
+    ];
 
-    // Contact Person Details Section
-    emailHTML += '<h3>Contact Person Details:</h3>';
-    emailHTML += formatField('Name', applicationData.contactPersonName);
-    emailHTML += formatField('Position', applicationData.contactPersonPosition);
-    emailHTML += formatField('Mobile', applicationData.contactPersonMobile);
-    emailHTML += formatField('Email', applicationData.contactPersonEmail);
+    const certificationFields = [
+      certificationsText ? renderField('Certifications Requested', certificationsText) : '',
+      renderField('Certification Scope', applicationData.certificationScope),
+      renderField('Certification Programme', applicationData.certificationProgramme),
+      renderField('Current Certifications', applicationData.currentCertifications),
+      renderField('Preferred Audit Date', applicationData.preferredAuditDate)
+    ];
 
-    // Executive Manager Details Section
-    if (applicationData.executiveManagerName || applicationData.executiveManagerEmail || applicationData.executiveManagerMobile) {
-      emailHTML += '<h3>Executive Manager Details:</h3>';
-      emailHTML += formatField('Name', applicationData.executiveManagerName);
-      emailHTML += formatField('Mobile', applicationData.executiveManagerMobile);
-      emailHTML += formatField('Email', applicationData.executiveManagerEmail);
-    }
+    const workforceFields = [
+      renderField('Total Employees', applicationData.workforceTotalEmployees),
+      renderField('Employees Per Shift', applicationData.workforceEmployeesPerShift),
+      renderField('Number of Shifts', applicationData.workforceNumberOfShifts),
+      renderField('Seasonal Employees', applicationData.workforceSeasonalEmployees)
+    ];
 
-    // Certification Details Section
-    emailHTML += '<h3>Certification Details:</h3>';
-    if (certificationsText) {
-      emailHTML += formatField('Certifications Requested', certificationsText);
-    }
+    const iso9001Fields = [
+      renderField('Design and Development', applicationData.iso9001DesignAndDevelopment),
+      renderField('Other Non-Applicable Clauses', applicationData.iso9001OtherNonApplicableClauses),
+      renderField('Non-Applicable Clauses Details', applicationData.iso9001OtherNonApplicableClausesText)
+    ];
 
-    // ALWAYS show Certification Scope - it's a critical required field
-    // Use fallback if empty: "Not provided"
-    const scopeValue = (applicationData.certificationScope && String(applicationData.certificationScope).trim())
-      ? applicationData.certificationScope
-      : 'Not provided';
-    emailHTML += `<p><strong>Certification Scope:</strong> ${he.encode(String(scopeValue), { useNamedReferences: true })}</p>`;
+    const iso14001Fields = [
+      renderField('Sites Managed', applicationData.iso14001SitesManaged),
+      renderField('Register of Significant Aspects', applicationData.iso14001RegisterOfSignificantAspects),
+      renderField('Environmental Management Manual', applicationData.iso14001EnvironmentalManagementManual),
+      renderField('Internal Audit Programme', applicationData.iso14001InternalAuditProgramme),
+      renderField('Internal Audit Implemented', applicationData.iso14001InternalAuditImplemented)
+    ];
 
-    emailHTML += formatField('Certification Programme', applicationData.certificationProgramme);
-    emailHTML += formatField('Current Certifications', applicationData.currentCertifications);
-    if (applicationData.transferReason) {
-      emailHTML += formatField('Transfer Reason', applicationData.transferReason);
-      emailHTML += formatField('Transfer Expiring Date', applicationData.transferExpiringDate);
-    }
-    if (applicationData.preferredAuditDate) {
-      const auditDate = new Date(applicationData.preferredAuditDate);
-      emailHTML += formatField('Preferred Audit Date', auditDate.toLocaleDateString());
-    }
+    const iso22000Fields = [
+      renderField('HACCP Implementation', applicationData.iso22000HaccpImplementation),
+      renderField('HACCP Studies', applicationData.iso22000HaccpStudies),
+      renderField('Sites', applicationData.iso22000Sites),
+      renderField('Process Lines', applicationData.iso22000ProcessLines),
+      renderField('Processing Type', applicationData.iso22000ProcessingType)
+    ];
 
-    // Workforce Details Section
-    if (applicationData.workforceTotalEmployees || applicationData.workforceEmployeesPerShift ||
-      applicationData.workforceNumberOfShifts || applicationData.workforceSeasonalEmployees) {
-      emailHTML += '<h3>Workforce Details:</h3>';
-      emailHTML += formatField('Total Employees', applicationData.workforceTotalEmployees);
-      emailHTML += formatField('Employees Per Shift', applicationData.workforceEmployeesPerShift);
-      emailHTML += formatField('Number of Shifts', applicationData.workforceNumberOfShifts);
-      emailHTML += formatField('Seasonal Employees', applicationData.workforceSeasonalEmployees);
-    }
+    const iso45001Fields = [
+      renderField('Hazards Identified', applicationData.iso45001HazardsIdentified),
+      renderField('Critical Risks', applicationData.iso45001CriticalRisks)
+    ];
 
-    // ISO 9001 Details Section
-    if (applicationData.iso9001DesignAndDevelopment || applicationData.iso9001OtherNonApplicableClauses) {
-      emailHTML += '<h3>ISO 9001 Details:</h3>';
-      emailHTML += formatField('Design and Development', yesNoValue(applicationData.iso9001DesignAndDevelopment));
-      emailHTML += formatField('Other Non-Applicable Clauses', yesNoValue(applicationData.iso9001OtherNonApplicableClauses));
-      if (isYes(applicationData.iso9001OtherNonApplicableClauses)) {
-        emailHTML += formatField('Details', applicationData.iso9001OtherNonApplicableClausesText);
-      }
-    }
+    const transferFields = [
+      renderField('Transfer Reason', applicationData.transferReason),
+      renderField('Expiring Date', applicationData.transferExpiringDate)
+    ];
 
-    // ISO 14001 Details Section
-    if (applicationData.iso14001SitesManaged || applicationData.iso14001RegisterOfSignificantAspects ||
-      applicationData.iso14001EnvironmentalManagementManual || applicationData.iso14001InternalAuditProgramme) {
-      emailHTML += '<h3>ISO 14001 Details:</h3>';
-      emailHTML += formatField('Sites Managed', applicationData.iso14001SitesManaged);
-      emailHTML += formatField('Register of Significant Aspects', yesNoValue(applicationData.iso14001RegisterOfSignificantAspects));
-      emailHTML += formatField('Environmental Management Manual', yesNoValue(applicationData.iso14001EnvironmentalManagementManual));
-      emailHTML += formatField('Internal Audit Programme', yesNoValue(applicationData.iso14001InternalAuditProgramme));
-      if (isYes(applicationData.iso14001InternalAuditProgramme)) {
-        emailHTML += formatField('Internal Audit Implemented', yesNoValue(applicationData.iso14001InternalAuditImplemented));
-      }
-    }
+    // Build the complete email HTML with only sections that have data
+    let emailHTML = `
+      <html>
+        <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6;">
+          <h2 style="color: #0066cc; border-bottom: 2px solid #0066cc; padding-bottom: 10px;">
+            📋 NEW CERTIFICATION APPLICATION
+          </h2>
+          
+          ${renderSection('Contact Information', '👤', contactInfoFields)}
+          ${renderSection('Company Information', '🏢', companyInfoFields)}
+          ${renderSection('Executive Manager Information', '👔', executiveManagerFields)}
+          ${renderSection('Certification Details', '✅', certificationFields)}
+          ${renderSection('Workforce Details', '👥', workforceFields)}
+          ${renderSection('ISO 9001 Details', '📊', iso9001Fields)}
+          ${renderSection('ISO 14001 Details', '🌍', iso14001Fields)}
+          ${renderSection('ISO 22000 Details', '🍔', iso22000Fields)}
+          ${renderSection('ISO 45001 Details', '⚠️', iso45001Fields)}
+          ${!isEmpty(applicationData.transferReason) ? renderSection('Transfer Information', '🔄', transferFields) : ''}
+          
+          ${!isEmpty(applicationData.additionalInfo) ? `
+            <h3 style="color: #0066cc; margin-top: 20px;">📝 Additional Information</h3>
+            <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px;">
+              <p>${escapeHtml(applicationData.additionalInfo).replace(/\n/g, '<br>')}</p>
+            </div>
+          ` : ''}
 
-    // ISO 22000 Details Section
-    if (applicationData.iso22000HaccpImplementation || applicationData.iso22000Sites) {
-      emailHTML += '<h3>ISO 22000 Details:</h3>';
-      emailHTML += formatField('HACCP Implementation', yesNoValue(applicationData.iso22000HaccpImplementation));
-      if (isYes(applicationData.iso22000HaccpImplementation)) {
-        emailHTML += formatField('HACCP Studies', applicationData.iso22000HaccpStudies);
-        emailHTML += formatField('Sites', applicationData.iso22000Sites);
-        emailHTML += formatField('Process Lines', applicationData.iso22000ProcessLines);
-        emailHTML += formatField('Processing Type', applicationData.iso22000ProcessingType);
-      }
-    }
+          ${renderFilesSection(applicationData.uploadedFiles)}
 
-    // ISO 45001 Details Section
-    if (applicationData.iso45001HazardsIdentified || applicationData.iso45001CriticalRisks) {
-      emailHTML += '<h3>ISO 45001 Details:</h3>';
-      emailHTML += formatField('Hazards Identified', yesNoValue(applicationData.iso45001HazardsIdentified));
-      if (isYes(applicationData.iso45001HazardsIdentified)) {
-        emailHTML += formatField('Critical Risks', applicationData.iso45001CriticalRisks);
-      }
-    }
+          <!-- FOOTER -->
+          <hr style="margin-top: 30px; border: none; border-top: 2px solid #ddd;">
+          <p style="color: #666; font-size: 12px;">
+            <strong>Submitted on:</strong> ${new Date().toLocaleString()}<br>
+            ${applicationData.requestId ? `<strong>Request ID:</strong> ${escapeHtml(applicationData.requestId)}` : ''}
+          </p>
+          <p style="color: #999; font-size: 10px;">
+            This is an automated notification from HORAS Certification System.<br>
+            Do not reply to this email directly.
+          </p>
+        </body>
+      </html>
+    `;
 
-    // Uploaded Files Section
-    if (applicationData.uploadedFiles && Array.isArray(applicationData.uploadedFiles) && applicationData.uploadedFiles.length > 0) {
-      emailHTML += '<h3>Uploaded Files:</h3>';
-      emailHTML += '<ul>';
-      applicationData.uploadedFiles.forEach(file => {
-        const fileUrl = (file && file.publicUrl)
-          ? file.publicUrl
-          : `${process.env.API_URL || 'http://localhost:5001'}/api/v1/applications/${applicationData.requestId}/file/${encodeURIComponent(file.storageKey)}`;
-        emailHTML += `<li><a href="${escapeHtml(fileUrl)}">${escapeHtml(file.name)}</a> (${file.size ? Math.round(file.size / 1024) + ' KB' : 'unknown size'})</li>`;
-      });
-      emailHTML += '</ul>';
-    }
+    const info = await sendEmail({
+      to: COMPANY_EMAIL,
+      subject: `New Certification Application - ${escapeHtml(String(applicationData.companyName || 'Submission'))}`,
+      html: emailHTML
+    });
 
-    // Additional Information Section
-    if (applicationData.additionalInfo) {
-      emailHTML += '<h3>Additional Information:</h3>';
-      emailHTML += `<p>${escapeHtml(applicationData.additionalInfo).replace(/\n/g, '<br>')}</p>`;
-    }
+    logger.info('Application email sent to company', {
+      to: COMPANY_EMAIL,
+      company: applicationData.companyName,
+      requestId: applicationData.requestId,
+      filesCount: Array.isArray(applicationData.uploadedFiles) ? applicationData.uploadedFiles.length : 0,
+      messageId: info.id
+    });
 
-    // Footer
-    emailHTML += '<hr>';
-    emailHTML += `<p><small>Submitted on: ${new Date().toLocaleString()}</small></p>`;
-
-    const from = getFromAddress('horascert.com');
-    if (!from) {
-      throw new Error('EMAIL_FROM is not set');
-    }
-
-    const mailOptions = {
-      from,
-      to: getRecipients(),
-      subject: 'New horascert.com Certification Application',
-      html: emailHTML,
-    };
-
-    const info = await sendEmail(mailOptions);
-    return { success: true, messageId: info.messageId };
+    return { success: true, messageId: info.id };
   } catch (error) {
     logger.error('Error sending application email:', error);
     return { success: false, error: error.message };
   }
 };
 
+/**
+ * Send application confirmation to applicant (SIMPLE version for user)
+ */
 const sendApplicationReceivedToClient = async ({ to, requestId }) => {
   try {
     if (!to) {
       return { success: false, error: 'Recipient email is required' };
     }
 
-    const from = getFromAddress('horascert.com');
-    if (!from) {
-      throw new Error('EMAIL_FROM is not set');
-    }
-
     const safeRequestId = requestId ? escapeHtml(String(requestId)) : '';
+    const safeTo = escapeHtml(String(to));
 
     const emailBody = `
-      <h2>We have received your application</h2>
-      <p>Thank you for submitting your application. Our team will review it and contact you soon.</p>
-      <p><strong>Request Number:</strong> ${safeRequestId}</p>
-      <p><strong>Current Status:</strong> Pending</p>
-      <hr>
-      <p><small>This is an automated confirmation message. Please do not reply.</small></p>
+      <html>
+        <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6;">
+          <h2 style="color: #0066cc;">✅ Application Received</h2>
+          
+          <p>Thank you for submitting your certification application!</p>
+          
+          <div style="background-color: #e8f4f8; padding: 15px; border-left: 4px solid #0066cc; margin: 20px 0;">
+            <p><strong>We have received your application and our team is reviewing it.</strong></p>
+            <p>We will contact you soon with updates.</p>
+          </div>
+
+          <h3>Your Application Details:</h3>
+          <ul style="background-color: #f9f9f9; padding: 15px; border-radius: 5px;">
+            <li><strong>Request Number:</strong> <code style="background-color: #f0f0f0; padding: 2px 6px; border-radius: 3px;">${safeRequestId}</code></li>
+            <li><strong>Status:</strong> <strong style="color: #ff9800;">Pending Review</strong></li>
+            <li><strong>Confirmation Email:</strong> ${safeTo}</li>
+          </ul>
+
+          <h3>What Happens Next?</h3>
+          <ol style="line-height: 2;">
+            <li>Our team will review your application thoroughly</li>
+            <li>We may contact you for additional information if needed</li>
+            <li>You'll receive a status update via email</li>
+            <li>Official certification process will begin upon approval</li>
+          </ol>
+
+          <hr style="margin-top: 30px; border: none; border-top: 2px solid #ddd;">
+          <p style="color: #666; font-size: 12px;">
+            <strong>Questions?</strong> Contact us at <strong>info@horascert.com</strong>
+          </p>
+          <p style="color: #999; font-size: 10px;">
+            This is an automated confirmation from HORAS Certification System.<br>
+            Please keep this email for your records. Do not reply to this email directly.
+          </p>
+        </body>
+      </html>
     `;
 
-    const mailOptions = {
-      from,
+    const info = await sendEmail({
       to,
-      subject: 'We have received your application',
-      html: emailBody,
-    };
+      subject: 'Your Certification Application Has Been Received',
+      html: emailBody
+    });
 
-    const info = await sendEmail(mailOptions);
-    return { success: true, messageId: info.messageId };
-  } catch (error) {
-    logger.error('Error sending application received email to client:', error);
-    return { success: false, error: error.message };
-  }
-};
-
-const sendContactAutoReplyToClient = async ({ to, name }) => {
-  try {
-    if (!to) {
-      return { success: false, error: 'Recipient email is required' };
-    }
-
-    const from = getFromAddress('horascert.com');
-    if (!from) {
-      throw new Error('EMAIL_FROM is not set');
-    }
-
-    const safeName = name ? escapeHtml(String(name)) : '';
-
-    const emailBody = `
-      <h2>We received your message</h2>
-      <p>Thank you${safeName ? `, ${safeName}` : ''}. We have received your message and our team will reply as soon as possible.</p>
-      <hr>
-      <p><small>This is an automated message. Please do not reply.</small></p>
-    `;
-
-    const mailOptions = {
-      from,
+    logger.info('Application confirmation email sent to client', {
       to,
-      subject: 'We received your message',
-      html: emailBody,
-    };
+      requestId,
+      messageId: info.id
+    });
 
-    const info = await sendEmail(mailOptions);
-    return { success: true, messageId: info.messageId };
+    return { success: true, messageId: info.id };
   } catch (error) {
-    logger.error('Error sending contact auto-reply email to client:', error);
-    return { success: false, error: error.message };
-  }
-};
-
-const sendApplicationStatusUpdateToClient = async ({ to, requestId, oldStatus, newStatus }) => {
-  try {
-    if (!to) {
-      return { success: false, error: 'Recipient email is required' };
-    }
-
-    const from = getFromAddress('horascert.com');
-    if (!from) {
-      throw new Error('EMAIL_FROM is not set');
-    }
-
-    const safeRequestId = requestId ? escapeHtml(String(requestId)) : '';
-    const safeOldStatus = oldStatus ? escapeHtml(String(oldStatus)) : '';
-    const safeNewStatus = newStatus ? escapeHtml(String(newStatus)) : '';
-
-    const emailBody = `
-      <h2>Your application status has been updated</h2>
-      <p><strong>Request Number:</strong> ${safeRequestId}</p>
-      <p><strong>Previous Status:</strong> ${safeOldStatus}</p>
-      <p><strong>New Status:</strong> ${safeNewStatus}</p>
-      <hr>
-      <p><small>This is an automated notification message. Please do not reply.</small></p>
-    `;
-
-    const mailOptions = {
-      from,
-      to,
-      subject: 'Your application status has been updated',
-      html: emailBody,
-    };
-
-    const info = await sendEmail(mailOptions);
-    return { success: true, messageId: info.messageId };
-  } catch (error) {
-    logger.error('Error sending application status update email to client:', error);
+    logger.error('Error sending application confirmation:', error);
     return { success: false, error: error.message };
   }
 };
 
 /**
- * Send contact form email
- * @param {Object} contactData - Contact form data
- * @returns {Promise<Object>} - Email send result
+ * Send application status update to applicant
+ */
+const sendApplicationStatusUpdateToClient = async ({ to, requestId, oldStatus, newStatus, companyName }) => {
+  try {
+    if (!to) {
+      return { success: false, error: 'Recipient email is required' };
+    }
+
+    const safeRequestId = requestId ? escapeHtml(String(requestId)) : '';
+    const safeOldStatus = oldStatus ? escapeHtml(String(oldStatus)) : '';
+    const safeNewStatus = newStatus ? escapeHtml(String(newStatus)) : '';
+    const safeCompanyName = companyName ? escapeHtml(String(companyName)) : '';
+
+    const emailBody = `
+      <html>
+        <body style="font-family: Arial, sans-serif; color: #333; line-height: 1.6;">
+          ${safeCompanyName ? `<p style="background-color: #e8f4f8; padding: 12px; border-left: 4px solid #0066cc; margin-bottom: 20px;"><strong>Company:</strong> ${safeCompanyName}</p>` : ''}
+          <h2 style="color: #0066cc;">Application Status Updated</h2>
+          <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px;">
+            <p><strong>Request Number:</strong> ${safeRequestId}</p>
+            <p><strong>Previous Status:</strong> <span style="color: #d9534f;">${safeOldStatus}</span></p>
+            <p><strong>New Status:</strong> <span style="color: #5cb85c;">${safeNewStatus}</span></p>
+          </div>
+          <hr style="margin-top: 30px; border: none; border-top: 2px solid #ddd;">
+          <p style="color: #999; font-size: 10px;">
+            This is an automated notification from HORAS Certification System.<br>
+            Please do not reply to this email directly.
+          </p>
+        </body>
+      </html>
+    `;
+
+    const info = await sendEmail({
+      to,
+      subject: 'Application Status Update',
+      html: emailBody
+    });
+
+    return { success: true, messageId: info.id };
+  } catch (error) {
+    logger.error('Error sending status update email:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+// ============================================================
+// 2. CONTACT FORM EMAILS
+// ============================================================
+
+/**
+ * Send contact form submission to company
  */
 const sendContactEmail = async (contactData) => {
   try {
@@ -456,35 +500,24 @@ const sendContactEmail = async (contactData) => {
 
     const emailBody = `
       <h2>New Contact Form Submission</h2>
-      
-      <h3>Contact Information:</h3>
+      <h3>From:</h3>
       <p><strong>Name:</strong> ${safeName}</p>
       <p><strong>Email:</strong> ${safeEmail}</p>
       <p><strong>Phone:</strong> ${safePhone}</p>
-      
-      <h3>Message Details:</h3>
+      <h3>Message:</h3>
       <p><strong>Subject:</strong> ${safeSubject}</p>
-      <p><strong>Message:</strong></p>
       <p>${safeMessage}</p>
-      
       <hr>
       <p><small>Submitted on: ${new Date().toLocaleString()}</small></p>
     `;
 
-    const from = getFromAddress('horascert.com');
-    if (!from) {
-      throw new Error('EMAIL_FROM is not set');
-    }
+    const info = await sendEmail({
+      to: COMPANY_EMAIL,
+      subject: `Contact Form: ${String(contactData.subject || 'New Inquiry')}`,
+      html: emailBody
+    });
 
-    const mailOptions = {
-      from,
-      to: getRecipients(),
-      subject: `horascert.com Contact Form: ${String(contactData.subject || '')}`,
-      html: emailBody,
-    };
-
-    const info = await sendEmail(mailOptions);
-    return { success: true, messageId: info.messageId };
+    return { success: true, messageId: info.id };
   } catch (error) {
     logger.error('Error sending contact email:', error);
     return { success: false, error: error.message };
@@ -492,158 +525,117 @@ const sendContactEmail = async (contactData) => {
 };
 
 /**
- * Send certificate notification email
- * @param {Object} certificate - Certificate document
- * @returns {Promise<Object>} - Email send result
+ * Send auto-reply to contact form submitter
+ */
+const sendContactAutoReplyToClient = async ({ to, name }) => {
+  try {
+    if (!to) {
+      return { success: false, error: 'Recipient email is required' };
+    }
+
+    const safeName = name ? escapeHtml(String(name)) : '';
+
+    const emailBody = `
+      <h2>We Received Your Message</h2>
+      <p>Dear ${safeName || 'Valued Customer'},</p>
+      <p>Thank you for contacting us. We have received your message and our team will respond as soon as possible.</p>
+      <hr>
+      <p><small>This is an automated response. Please do not reply.</small></p>
+    `;
+
+    const info = await sendEmail({
+      to,
+      subject: 'We Received Your Message',
+      html: emailBody
+    });
+
+    return { success: true, messageId: info.id };
+  } catch (error) {
+    logger.error('Error sending contact auto-reply:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Send reply from admin to contact form
+ */
+const sendReplyToUser = async ({ to, userName, replyMessage }) => {
+  try {
+    if (!to) {
+      return { success: false, error: 'Recipient email is required' };
+    }
+
+    if (!replyMessage || replyMessage.trim() === '') {
+      return { success: false, error: 'Reply message is required' };
+    }
+
+    const safeName = userName ? escapeHtml(String(userName)) : 'Valued Customer';
+    const safeMessage = escapeHtml(replyMessage).replace(/\n/g, '<br>');
+
+    const emailBody = `
+      <h2>Response to Your Inquiry</h2>
+      <p>Dear ${safeName},</p>
+      <p>Thank you for reaching out. Here is our response:</p>
+      <div style="background-color: #f5f5f5; padding: 15px; margin: 20px 0; border-left: 4px solid #007bff;">
+        <p>${safeMessage}</p>
+      </div>
+      <p>If you have further questions, please feel free to contact us.</p>
+      <hr>
+      <p><small>Best regards,<br/>
+      <strong>HORAS Certification Team</strong><br/>
+      <a href="https://horascert.com">horascert.com</a></small></p>
+    `;
+
+    const info = await sendEmail({
+      to,
+      subject: 'Response to Your Inquiry',
+      html: emailBody
+    });
+
+    return { success: true, messageId: info.id };
+  } catch (error) {
+    logger.error('Error sending reply email:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+// ============================================================
+// 3. CERTIFICATE EMAILS
+// ============================================================
+
+/**
+ * Send certificate notification to company (internal)
  */
 const sendCertificateNotification = async (certificate) => {
   try {
     const emailBody = `
       <h2>New Certificate Created</h2>
-      
       <h3>Certificate Information:</h3>
-      <p><strong>Certificate Number:</strong> ${certificate.certificateNumber}</p>
-      <p><strong>Company Name:</strong> ${certificate.companyName}</p>
-      <p><strong>Standard:</strong> ${certificate.standard}</p>
-      <p><strong>Scope:</strong> ${certificate.scope}</p>
+      <p><strong>Certificate Number:</strong> ${escapeHtml(certificate.certificateNumber)}</p>
+      <p><strong>Company:</strong> ${escapeHtml(certificate.companyName)}</p>
+      <p><strong>Standard:</strong> ${escapeHtml(certificate.standard)}</p>
+      <p><strong>Scope:</strong> ${escapeHtml(certificate.scope)}</p>
       <p><strong>Issue Date:</strong> ${certificate.issueDate ? new Date(certificate.issueDate).toLocaleDateString() : 'N/A'}</p>
       <p><strong>Expiry Date:</strong> ${certificate.expiryDate ? new Date(certificate.expiryDate).toLocaleDateString() : 'N/A'}</p>
-      <p><strong>Status:</strong> ${certificate.status || 'active'}</p>
-      
       <hr>
       <p><small>Created on: ${new Date().toLocaleString()}</small></p>
     `;
 
-    const from = getFromAddress('horascert.com');
-    if (!from) {
-      throw new Error('EMAIL_FROM is not set');
-    }
+    const info = await sendEmail({
+      to: COMPANY_EMAIL,
+      subject: `New Certificate: ${certificate.companyName}`,
+      html: emailBody
+    });
 
-    const mailOptions = {
-      from,
-      to: getRecipients(),
-      subject: `New Certificate Created: ${certificate.companyName}`,
-      html: emailBody,
-    };
-
-    const info = await sendEmail(mailOptions);
-    return { success: true, messageId: info.messageId };
+    return { success: true, messageId: info.id };
   } catch (error) {
-    logger.error('Error sending certificate notification email:', error);
+    logger.error('Error sending certificate notification:', error);
     return { success: false, error: error.message };
   }
 };
 
 /**
- * Send training certificate notification email
- * @param {Object} certificate - TrainingCertificate document
- * @returns {Promise<Object>} - Email send result
- */
-const sendTrainingCertificateNotification = async (certificate) => {
-  try {
-    const emailBody = `
-      <h2>New Training Certificate Created</h2>
-      
-      <h3>Training Certificate Information:</h3>
-      <p><strong>Certificate Number:</strong> ${certificate.certificateNumber}</p>
-      <p><strong>Trainee Name:</strong> ${certificate.trainee.name}</p>
-      <p><strong>Organization:</strong> ${certificate.trainee.organization}</p>
-      <p><strong>Course Name:</strong> ${certificate.training.courseName}</p>
-      <p><strong>Category:</strong> ${certificate.training.category}</p>
-      <p><strong>Training Date:</strong> ${certificate.training.date ? new Date(certificate.training.date).toLocaleDateString() : 'N/A'}</p>
-      <p><strong>Duration:</strong> ${certificate.training.hours || 0} hours</p>
-      <p><strong>Trainer:</strong> ${certificate.training.trainer || 'N/A'}</p>
-      <p><strong>Issue Date:</strong> ${certificate.issueDate ? new Date(certificate.issueDate).toLocaleDateString() : 'N/A'}</p>
-      <p><strong>Expiry Date:</strong> ${certificate.expiryDate ? new Date(certificate.expiryDate).toLocaleDateString() : 'N/A'}</p>
-      <p><strong>Status:</strong> ${certificate.status || 'active'}</p>
-      
-      <p><strong>Verification URL:</strong> <a href="${certificate.qrCode}" target="_blank">${certificate.qrCode}</a></p>
-      
-      <hr>
-      <p><small>Created on: ${new Date().toLocaleString()}</small></p>
-    `;
-
-    const from = getFromAddress('horascert.com');
-    if (!from) {
-      throw new Error('EMAIL_FROM is not set');
-    }
-
-    const mailOptions = {
-      from,
-      to: getRecipients(),
-      subject: `New Training Certificate Created: ${certificate.trainee.name}`,
-      html: emailBody,
-    };
-
-    const info = await sendEmail(mailOptions);
-    return { success: true, messageId: info.messageId };
-  } catch (error) {
-    logger.error('Error sending training certificate notification email:', error);
-    return { success: false, error: error.message };
-  }
-};
-
-/**
- * Send training certificate to trainee
- * @param {Object} certificate - TrainingCertificate document
- * @returns {Promise<Object>} - Email send result
- */
-const sendTrainingCertificateToTrainee = async (certificate) => {
-  try {
-    if (!certificate.trainee.email) {
-      return { success: false, error: 'Trainee email is required' };
-    }
-
-    const emailBody = `
-      <h2>Your Training Certificate - HORASCert</h2>
-      
-      <p>Dear ${certificate.trainee.name},</p>
-      
-      <p>Congratulations! Your training certificate has been successfully issued.</p>
-      
-      <h3>Certificate Details:</h3>
-      <p><strong>Certificate Number:</strong> ${certificate.certificateNumber}</p>
-      <p><strong>Course Name:</strong> ${certificate.training.courseName}</p>
-      <p><strong>Training Date:</strong> ${certificate.training.date ? new Date(certificate.training.date).toLocaleDateString() : 'N/A'}</p>
-      <p><strong>Duration:</strong> ${certificate.training.hours || 0} hours</p>
-      <p><strong>Issue Date:</strong> ${certificate.issueDate ? new Date(certificate.issueDate).toLocaleDateString() : 'N/A'}</p>
-      <p><strong>Expiry Date:</strong> ${certificate.expiryDate ? new Date(certificate.expiryDate).toLocaleDateString() : 'N/A'}</p>
-      
-      <h3>Verify Your Certificate</h3>
-      <p>You can verify the authenticity of your certificate by scanning the QR code or visiting:</p>
-      <p><a href="${certificate.qrCode}" target="_blank">${certificate.qrCode}</a></p>
-      
-      <p>Thank you for choosing horascert.com for your training needs.</p>
-      
-      <hr>
-      <p><small>This is an automated message. Please do not reply to this email.</small></p>
-      <p><small>Sent on: ${new Date().toLocaleString()}</small></p>
-    `;
-
-    const from = getFromAddress('horascert.com');
-    if (!from) {
-      throw new Error('EMAIL_FROM is not set');
-    }
-
-    const mailOptions = {
-      from,
-      to: certificate.trainee.email,
-      subject: `Your Training Certificate - ${certificate.trainee.name}`,
-      html: emailBody,
-    };
-
-    const info = await sendEmail(mailOptions);
-    return { success: true, messageId: info.messageId };
-  } catch (error) {
-    logger.error('Error sending training certificate to trainee:', error);
-    return { success: false, error: error.message };
-  }
-};
-
-/**
- * Send ISO certificate to company
- * @param {Object} certificate - Certificate document
- * @returns {Promise<Object>} - Email send result
+ * Send certificate to company
  */
 const sendCertificateToCompany = async (certificate) => {
   try {
@@ -652,60 +644,127 @@ const sendCertificateToCompany = async (certificate) => {
     }
 
     const emailBody = `
-      <h2>Your ISO Certificate - HORASCert</h2>
-      
+      <h2>Your ISO Certificate</h2>
       <p>Hello,</p>
-      
       <p>Your ISO certificate has been issued successfully.</p>
-      
       <h3>Certificate Details:</h3>
-      <p><strong>Certificate Number:</strong> ${certificate.certificateNumber}</p>
-      <p><strong>Company:</strong> ${certificate.companyName}</p>
-      <p><strong>Standard:</strong> ${certificate.standard}</p>
-      <p><strong>Scope:</strong> ${certificate.scope}</p>
+      <p><strong>Certificate Number:</strong> ${escapeHtml(certificate.certificateNumber)}</p>
+      <p><strong>Company:</strong> ${escapeHtml(certificate.companyName)}</p>
+      <p><strong>Standard:</strong> ${escapeHtml(certificate.standard)}</p>
+      <p><strong>Scope:</strong> ${escapeHtml(certificate.scope)}</p>
       <p><strong>Issue Date:</strong> ${certificate.issueDate ? new Date(certificate.issueDate).toLocaleDateString() : 'N/A'}</p>
       <p><strong>Expiry Date:</strong> ${certificate.expiryDate ? new Date(certificate.expiryDate).toLocaleDateString() : 'N/A'}</p>
-      
-      <h3>Verify Your Certificate</h3>
-      <p>You can verify the authenticity of your certificate by visiting:</p>
-      <p><a href="${process.env.FRONTEND_URL}/certificate/${certificate.certificateId}" target="_blank">${process.env.FRONTEND_URL}/certificate/${certificate.certificateId}</a></p>
-      
+      <h3>Verify Your Certificate:</h3>
+      <p><a href="${process.env.FRONTEND_URL || 'https://horascert.com'}/certificate/${certificate.certificateId}" target="_blank">View Certificate</a></p>
       <p>Thank you.</p>
-      <p><strong>horascert.com</strong></p>
-      
+      <p><strong>HORAS Certification</strong></p>
       <hr>
-      <p><small>This is an automated message. Please do not reply to this email.</small></p>
-      <p><small>Sent on: ${new Date().toLocaleString()}</small></p>
+      <p><small>This is an automated message. Please do not reply.</small></p>
     `;
 
-    const from = getFromAddress('horascert.com');
-    if (!from) {
-      throw new Error('EMAIL_FROM is not set');
-    }
-
-    const mailOptions = {
-      from,
+    const info = await sendEmail({
       to: certificate.companyEmail,
       subject: `Your ISO Certificate - ${certificate.companyName}`,
-      html: emailBody,
-    };
+      html: emailBody
+    });
 
-    const info = await sendEmail(mailOptions);
-    return { success: true, messageId: info.messageId };
+    return { success: true, messageId: info.id };
   } catch (error) {
-    logger.error('Error sending ISO certificate to company:', error);
+    logger.error('Error sending certificate to company:', error);
     return { success: false, error: error.message };
   }
 };
 
+// ============================================================
+// 4. TRAINING CERTIFICATE EMAILS
+// ============================================================
+
+/**
+ * Send training certificate notification to company (internal)
+ */
+const sendTrainingCertificateNotification = async (certificate) => {
+  try {
+    const emailBody = `
+      <h2>New Training Certificate Created</h2>
+      <h3>Certificate Details:</h3>
+      <p><strong>Certificate Number:</strong> ${escapeHtml(certificate.certificateNumber)}</p>
+      <p><strong>Trainee Name:</strong> ${escapeHtml(certificate.trainee.name)}</p>
+      <p><strong>Organization:</strong> ${escapeHtml(certificate.trainee.organization)}</p>
+      <p><strong>Course:</strong> ${escapeHtml(certificate.training.courseName)}</p>
+      <p><strong>Training Hours:</strong> ${certificate.training.hours}</p>
+      <p><strong>Expiry Date:</strong> ${certificate.expiryDate ? new Date(certificate.expiryDate).toLocaleDateString() : 'N/A'}</p>
+      <hr>
+      <p><small>Created on: ${new Date().toLocaleString()}</small></p>
+    `;
+
+    const info = await sendEmail({
+      to: COMPANY_EMAIL,
+      subject: `New Training Certificate: ${certificate.trainee.name}`,
+      html: emailBody
+    });
+
+    return { success: true, messageId: info.id };
+  } catch (error) {
+    logger.error('Error sending training certificate notification:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Send training certificate to trainee
+ */
+const sendTrainingCertificateToTrainee = async (certificate) => {
+  try {
+    if (!certificate.trainee.email) {
+      return { success: false, error: 'Trainee email is required' };
+    }
+
+    const emailBody = `
+      <h2>Your Training Certificate</h2>
+      <p>Dear ${escapeHtml(certificate.trainee.name)},</p>
+      <p>Congratulations! Your training certificate has been successfully issued.</p>
+      <h3>Certificate Details:</h3>
+      <p><strong>Certificate Number:</strong> ${escapeHtml(certificate.certificateNumber)}</p>
+      <p><strong>Organization:</strong> ${escapeHtml(certificate.trainee.organization)}</p>
+      <p><strong>Course Name:</strong> ${escapeHtml(certificate.training.courseName)}</p>
+      <p><strong>Training Hours:</strong> ${certificate.training.hours}</p>
+      <p><strong>Training Date:</strong> ${certificate.training.date ? new Date(certificate.training.date).toLocaleDateString() : 'N/A'}</p>
+      <p><strong>Issue Date:</strong> ${new Date(certificate.issueDate).toLocaleDateString()}</p>
+      <p><strong>Expiry Date:</strong> ${new Date(certificate.expiryDate).toLocaleDateString()}</p>
+      <h3>Verify Your Certificate:</h3>
+      <p><a href="${process.env.FRONTEND_URL || 'https://horascert.com'}/verify/training/${certificate.certificateNumber}" target="_blank">View Certificate</a></p>
+      <p>Thank you for choosing HORAS for your training needs.</p>
+      <hr>
+      <p><small>This is an automated message. Please do not reply.</small></p>
+    `;
+
+    const info = await sendEmail({
+      to: certificate.trainee.email,
+      subject: `Your Training Certificate - ${certificate.trainee.name}`,
+      html: emailBody
+    });
+
+    return { success: true, messageId: info.id };
+  } catch (error) {
+    logger.error('Error sending training certificate to trainee:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+// ============================================================
+// EXPORTS
+// ============================================================
+
 module.exports = {
+  sendEmail,
   sendApplicationEmail,
+  sendApplicationReceivedToClient,
+  sendApplicationStatusUpdateToClient,
   sendContactEmail,
+  sendContactAutoReplyToClient,
+  sendReplyToUser,
   sendCertificateNotification,
   sendCertificateToCompany,
   sendTrainingCertificateNotification,
-  sendTrainingCertificateToTrainee,
-  sendApplicationReceivedToClient,
-  sendContactAutoReplyToClient,
-  sendApplicationStatusUpdateToClient
+  sendTrainingCertificateToTrainee
 };

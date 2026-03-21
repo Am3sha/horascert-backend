@@ -18,6 +18,7 @@ const emailsRouter = require('./routes/emails');
 const trainingCertificatesRouter = require('./routes/trainingCertificates');
 
 const csrfCheck = require('./middleware/csrfCheck');
+const path = require('path');
 
 // Import centralized error handler
 const { ApiError, errorHandler, notFound } = require('./middleware/errorHandler');
@@ -34,6 +35,29 @@ app.set('trust proxy', 1);
 
 // Remove identifying header
 app.disable('x-powered-by');
+
+// ========================================
+// STATIC FILE SERVING (PRODUCTION DEPLOYMENT)
+// ========================================
+// Serve the React frontend build if it exists (for single-deployment scenario)
+// This allows deploying both frontend and backend to the same server
+const buildPath = path.join(__dirname, '../build');
+const publicPath = path.join(__dirname, '../public');
+
+// Serve static files with long cache headers for production assets
+app.use('/static', express.static(path.join(buildPath, 'static'), {
+    maxAge: '1y', // 1 year cache for versioned assets
+    etag: false
+}));
+
+// Serve favicon and public assets
+// CUSTOM FAVICON: Using /imgeteam/favicon.ico as primary favicon
+app.use('/favicon.ico', express.static(path.join(publicPath, 'imgeteam', 'favicon.ico')));
+app.use('/robots.txt', express.static(path.join(publicPath, 'robots.txt')));
+// Serve other public assets (images)
+app.use('/imges', express.static(path.join(publicPath, 'imges')));
+app.use('/imgesclinet', express.static(path.join(publicPath, 'imgesclinet')));
+app.use('/imgeteam', express.static(path.join(publicPath, 'imgeteam')));
 
 // Security headers with CSP to prevent XSS
 app.use(helmet({
@@ -150,6 +174,26 @@ app.use('/api/v1/training-certificates', csrfCheck, trainingCertificatesRouter);
 
 // Legacy support: /api/applications without v1 prefix
 app.use('/api/applications', applicationsRouter);
+
+// ========================================
+// SPA FALLBACK ROUTE (Production Deployment)
+// ========================================
+// For single-deployment: Serve React build and fallback to index.html for SPA routing
+if (process.env.NODE_ENV === 'production' || process.env.SERVE_FRONTEND === 'true') {
+    // Serve index.html for all non-API routes (SPA routing)
+    app.get(/^(?!\/api\/)/, (req, res) => {
+        const indexPath = path.join(buildPath, 'index.html');
+        res.sendFile(indexPath, (err) => {
+            if (err) {
+                // If index.html doesn't exist, continue to error handlers
+                res.status(404).json({
+                    success: false,
+                    message: 'Frontend build not found. Deploy the React build to /build directory or set SERVE_FRONTEND=false'
+                });
+            }
+        });
+    });
+}
 
 // Handle large payload errors (and Multer upload errors) before 404 + centralized handler
 app.use((err, req, res, next) => {

@@ -34,7 +34,8 @@ const updateApplicationAdmin = async (req, res) => {
                         to: app.email,
                         requestId: app._id.toString(),
                         oldStatus,
-                        newStatus
+                        newStatus,
+                        companyName: app.companyName
                     });
 
                     if (result && result.success) {
