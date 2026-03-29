@@ -60,7 +60,8 @@ const createCertificate = async (req, res, next) => {
             companyAddress,
             standard,
             standardDescription,
-            scope
+            scope,
+            technicalSector
         } = sanitizedBody;
 
         // Validate required fields
@@ -112,6 +113,7 @@ const createCertificate = async (req, res, next) => {
             standard,
             standardDescription,
             scope,
+            technicalSector: technicalSector || null,
             certificationType: 'Management System',
             issueDate: new Date(issueDate),
             expiryDate: new Date(expiryDate),
@@ -227,6 +229,8 @@ const getCertificates = async (req, res, next) => {
             'expiryDate',
             'firstIssueDate',
             'scope',
+            'technicalSector',
+            'technicalSectorCode',
             'qrCodeUrl',
             'sites',
             'technicalSectors',
@@ -352,6 +356,8 @@ const getCertificate = async (req, res, next) => {
             'expiryDate',
             'firstIssueDate',
             'scope',
+            'technicalSector',
+            'technicalSectorCode',
             'qrCodeUrl',
             'sites',
             'technicalSectors',
@@ -412,6 +418,7 @@ const updateCertificate = async (req, res, next) => {
             'standard',
             'standardDescription',
             'scope',
+            'technicalSector',
             'issueDate',
             'expiryDate',
             'firstIssueDate',
@@ -597,6 +604,7 @@ const updateCertificateByCertificateId = async (req, res) => {
             'standard',
             'standardDescription',
             'scope',
+            'technicalSector',
             'issueDate',
             'expiryDate',
             'firstIssueDate',

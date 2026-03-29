@@ -57,6 +57,20 @@ const certificateSchema = new mongoose.Schema({
         trim: true
     },
 
+    // Technical Sector (Optional)
+    technicalSector: {
+        type: String,
+        trim: true,
+        default: null
+    },
+
+    // Technical Sector Code (Optional)
+    technicalSectorCode: {
+        type: String,
+        trim: true,
+        default: null
+    },
+
     // Certification Type
     certificationType: {
         type: String,
